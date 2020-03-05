@@ -1304,10 +1304,10 @@ where
                 let mut m = Digest::new();
                 // Hash inputs:
                 // 1. A version
-                m.update(CACHE_VERSION);
+                m.update(CACHE_VERSION, &"");
                 // 2. compiler_shlibs_digests
                 for d in compiler_shlibs_digests {
-                    m.update(d.as_bytes());
+                    m.update(d.as_bytes(), &"");
                 }
                 let weak_toolchain_key = m.clone().finish();
                 // 3. The full commandline (self.arguments)
@@ -1340,7 +1340,7 @@ where
                             a
                         })
                 };
-                args.hash(&mut HashToDigest { digest: &mut m });
+                args.hash(&mut HashToDigest { digest: &mut m, annotation: &"args" });
                 // 4. The digest of all source files (this includes src file from cmdline).
                 // 5. The digest of all files listed on the commandline (self.externs).
                 // 6. The digest of all static libraries listed on the commandline (self.staticlibs).
@@ -1349,7 +1349,7 @@ where
                     .chain(extern_hashes)
                     .chain(staticlib_hashes)
                 {
-                    m.update(h.as_bytes());
+                    m.update(h.as_bytes(), &"");
                 }
                 // 7. Environment variables. Ideally we'd use anything referenced
                 // via env! in the program, but we don't have a way to determine that
@@ -1368,13 +1368,13 @@ where
                 for &(ref var, ref val) in env_vars.iter() {
                     // CARGO_MAKEFLAGS will have jobserver info which is extremely non-cacheable.
                     if var.starts_with("CARGO_") && var != "CARGO_MAKEFLAGS" {
-                        var.hash(&mut HashToDigest { digest: &mut m });
-                        m.update(b"=");
-                        val.hash(&mut HashToDigest { digest: &mut m });
+                        var.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("env var: {:?}", var) });
+                        m.update(&b"="[..], &"=");
+                        val.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("env val: {:?}", val) });
                     }
                 }
                 // 8. The cwd of the compile. This will wind up in the rlib.
-                cwd.hash(&mut HashToDigest { digest: &mut m });
+                cwd.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("cwd: {:?}", cwd) });
                 // Turn arguments into a simple Vec<OsString> to calculate outputs.
                 let flat_os_string_arguments: Vec<OsString> = os_string_arguments
                     .into_iter()

@@ -17,8 +17,10 @@ use blake3::Hasher as blake3_Hasher;
 use byteorder::{BigEndian, ByteOrder};
 use futures::{future, Future};
 use futures_cpupool::CpuPool;
+use log::Level::Debug;
 use serde::Serialize;
 use std::ffi::{OsStr, OsString};
+use std::fmt::Display;
 use std::fs::File;
 use std::hash::Hasher;
 use std::io::prelude::*;
@@ -52,7 +54,7 @@ impl Digest {
     }
 
     /// Calculate the BLAKE3 digest of the contents read from `reader`.
-    pub fn reader_sync<R: Read>(reader: R) -> Result<String> {
+    pub fn reader_sync<R: Read>(reader: R, annotation: &dyn Display) -> Result<String> {
         let mut m = Digest::new();
         let mut reader = BufReader::new(reader);
         loop {
@@ -63,7 +65,7 @@ impl Digest {
             if count == 0 {
                 break;
             }
-            m.update(&buffer[..count]);
+            m.update(&buffer[..count], annotation);
         }
         Ok(m.finish())
     }
@@ -74,11 +76,16 @@ impl Digest {
         Box::new(pool.spawn_fn(move || -> Result<_> {
             let reader = File::open(&path)
                 .chain_err(|| format!("Failed to open file for hashing: {:?}", path))?;
-            Digest::reader_sync(reader)
+            Digest::reader_sync(reader, &path.display())
         }))
     }
 
-    pub fn update(&mut self, bytes: &[u8]) {
+    pub fn update(&mut self, bytes: &[u8], annotation: &dyn Display) {
+        if log_enabled!(Debug) {
+            let mut fragment = Context::new(&SHA512);
+            fragment.update(bytes);
+            debug!("Digest: {} -> '{}'", annotation, hex(fragment.finish().as_ref()));
+       }
         self.inner.update(bytes);
     }
 
@@ -325,11 +332,15 @@ impl OsStrExt for OsStr {
 
 pub struct HashToDigest<'a> {
     pub digest: &'a mut Digest,
+    pub annotation: &'a dyn Display,
 }
 
 impl<'a> Hasher for HashToDigest<'a> {
     fn write(&mut self, bytes: &[u8]) {
-        self.digest.update(bytes)
+        info!("YYY {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}", bytes.len(),
+              bytes.get(0), bytes.get(1), bytes.get(2), bytes.get(3),
+              bytes.get(4), bytes.get(5), bytes.get(6), bytes.get(7));
+        self.digest.update(bytes, self.annotation)
     }
 
     fn finish(&self) -> u64 {

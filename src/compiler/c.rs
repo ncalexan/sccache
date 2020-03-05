@@ -624,24 +624,25 @@ pub fn hash_key(
 ) -> String {
     // If you change any of the inputs to the hash, you should change `CACHE_VERSION`.
     let mut m = Digest::new();
-    m.update(compiler_digest.as_bytes());
-    m.update(CACHE_VERSION);
-    m.update(language.as_str().as_bytes());
+    m.update(compiler_digest.as_bytes(), &"compiler_digest");
+    m.update(CACHE_VERSION, &"CACHE_VERSION");
+    m.update(language.as_str().as_bytes(), &"language");
     for arg in arguments {
-        arg.hash(&mut HashToDigest { digest: &mut m });
+        arg.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("arg {:?}", arg) });
+        info!("XXX");
     }
     for hash in extra_hashes {
-        m.update(hash.as_bytes());
+        m.update(hash.as_bytes(), &"extra hash");
     }
 
     for &(ref var, ref val) in env_vars.iter() {
         if CACHED_ENV_VARS.contains(var.as_os_str()) {
-            var.hash(&mut HashToDigest { digest: &mut m });
-            m.update(&b"="[..]);
-            val.hash(&mut HashToDigest { digest: &mut m });
+            var.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("env var: {:?}", var) });
+            m.update(&b"="[..], &"=");
+            val.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("env val: {:?}", val) });
         }
     }
-    m.update(preprocessor_output);
+    m.update(preprocessor_output, &"preprocessor_output");
     m.finish()
 }
 
