@@ -1309,7 +1309,7 @@ where
                 for d in compiler_shlibs_digests {
                     m.update(d.as_bytes(), &"");
                 }
-                let weak_toolchain_key = m.clone().finish();
+                let (weak_toolchain_key, _weak_toolchain_key_details) = m.clone().finish();
                 // 3. The full commandline (self.arguments)
                 // TODO: there will be full paths here, it would be nice to
                 // normalize them so we can get cross-machine cache hits.
@@ -1462,8 +1462,10 @@ where
                             .chain(abs_staticlibs)
                             .collect();
 
+                        let (key, details) = m.finish();
+
                         HashResult {
-                            key: m.finish(),
+                            key,
                             compilation: Box::new(RustCompilation {
                                 executable,
                                 host,
@@ -1481,6 +1483,7 @@ where
                                 rlib_dep_reader,
                             }),
                             weak_toolchain_key,
+                            details,
                         }
                     }),
                 )

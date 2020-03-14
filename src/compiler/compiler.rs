@@ -24,7 +24,7 @@ use crate::dist;
 #[cfg(feature = "dist-client")]
 use crate::dist::pkg;
 use crate::mock_command::{exit_status, CommandChild, CommandCreatorSync, RunCommand};
-use crate::util::{fmt_duration_as_secs, ref_env, run_input_output};
+use crate::util::{fmt_duration_as_secs, ref_env, run_input_output, Details};
 use filetime::FileTime;
 use futures::Future;
 use futures_cpupool::CpuPool;
@@ -218,6 +218,7 @@ where
                     key,
                     compilation,
                     weak_toolchain_key,
+                    details: _,
                 }) => (key, compilation, weak_toolchain_key),
             };
             trace!("[{}]: Hash key: {}", out_pretty, key);
@@ -689,6 +690,7 @@ pub struct HashResult {
     pub compilation: Box<dyn Compilation + 'static>,
     /// A weak key that may be used to identify the toolchain
     pub weak_toolchain_key: String,
+    pub details: Option<Details>,
 }
 
 /// Possible results of parsing compiler arguments.

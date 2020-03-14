@@ -32,15 +32,25 @@ use std::time::Duration;
 
 use crate::errors::*;
 
+pub type Details = Vec<(String, String)>;
+
 #[derive(Clone)]
 pub struct Digest {
     inner: blake3_Hasher,
+    inner: Context,
+    details: Option<Details>,
 }
 
 impl Digest {
     pub fn new() -> Digest {
+        let details = if log_enabled!(Debug) {
+            Some(Vec::new())
+        } else {
+            None
+        };
         Digest {
             inner: blake3_Hasher::new(),
+            details,
         }
     }
 
@@ -67,7 +77,8 @@ impl Digest {
             }
             m.update(&buffer[..count], annotation);
         }
-        Ok(m.finish())
+        let (hash, _details) = m.finish();
+        Ok(hash)
     }
 
     /// Calculate the BLAKE3 digest of the contents of `path`, running
@@ -81,16 +92,20 @@ impl Digest {
     }
 
     pub fn update(&mut self, bytes: &[u8], annotation: &dyn Display) {
-        if log_enabled!(Debug) {
-            let mut fragment = Context::new(&SHA512);
-            fragment.update(bytes);
-            debug!("Digest: {} -> '{}'", annotation, hex(fragment.finish().as_ref()));
-       }
+        self.details.as_mut().map(|details| {
+            if log_enabled!(Debug) {
+                let mut fragment = Context::new(&SHA512);
+                fragment.update(bytes);
+                let fragment = hex(fragment.finish().as_ref());
+                debug!("Digest: {} -> '{}'", annotation, fragment);
+                details.push((format!("{}", annotation), fragment))
+            }
+        });
         self.inner.update(bytes);
     }
 
-    pub fn finish(self) -> String {
-        hex(self.inner.finalize().as_bytes())
+    pub fn finish(self) -> (String, Option<Details>) {
+        (hex(self.inner.finalize().as_bytes()), self.details)
     }
 }
 

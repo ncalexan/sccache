@@ -22,7 +22,7 @@ use crate::dist;
 #[cfg(feature = "dist-client")]
 use crate::dist::pkg;
 use crate::mock_command::CommandCreatorSync;
-use crate::util::{hash_all, Digest, HashToDigest};
+use crate::util::{hash_all, Details, Digest, HashToDigest};
 use futures::Future;
 use futures_cpupool::CpuPool;
 use std::borrow::Cow;
@@ -327,7 +327,7 @@ where
                     );
 
                     Box::new(extra_hashes.and_then(move |extra_hashes| {
-                        let key = {
+                        let (key, details) = {
                             hash_key(
                                 &executable_digest,
                                 parsed_args.language,
@@ -354,6 +354,7 @@ where
                                 env_vars,
                             }),
                             weak_toolchain_key,
+                            details,
                         })
                     }))
                 }),
@@ -621,7 +622,7 @@ pub fn hash_key(
     extra_hashes: &[String],
     env_vars: &[(OsString, OsString)],
     preprocessor_output: &[u8],
-) -> String {
+) -> (String, Option<Details>) {
     // If you change any of the inputs to the hash, you should change `CACHE_VERSION`.
     let mut m = Digest::new();
     m.update(compiler_digest.as_bytes(), &"compiler_digest");
