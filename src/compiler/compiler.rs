@@ -28,6 +28,7 @@ use crate::util::{fmt_duration_as_secs, ref_env, run_input_output, Details};
 use filetime::FileTime;
 use futures::Future;
 use futures_cpupool::CpuPool;
+use log::Level::Debug;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -319,14 +320,27 @@ where
 
                 // Cache miss, so compile it.
                 let start = Instant::now();
-                let compile = dist_or_local_compile(
-                    dist_client,
-                    creator,
-                    cwd,
-                    compilation,
-                    weak_toolchain_key,
-                    out_pretty.clone(),
-                );
+                let compile = match false { // log_enabled!(Debug) {
+                    false => {
+                        dist_or_local_compile(
+                            dist_client,
+                            creator,
+                            cwd,
+                            compilation,
+                            weak_toolchain_key,
+                            out_pretty.clone(),
+                        )
+                    },
+                    true => {
+                        // SFuture<(Cacheable, DistType, process::Output)>
+                        let output = process::Output {
+                            status: exit_status(0),
+                            stdout: Vec::new(),
+                            stderr: Vec::new(),
+                        };
+                        f_ok((Cacheable::Yes, DistType::NoDist, output))
+                    }
+                };
 
                 Box::new(
                     compile.and_then(move |(cacheable, dist_type, compiler_result)| {
