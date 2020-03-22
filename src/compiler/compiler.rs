@@ -186,7 +186,7 @@ where
         pool: CpuPool,
     ) -> SFuture<(CompileResult, process::Output)> {
         let out_pretty = self.output_pretty().into_owned();
-        debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
+        info!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
         let start = Instant::now();
         let may_dist = match dist_client {
             Ok(Some(_)) => true,
@@ -210,7 +210,7 @@ where
                 out_pretty,
                 fmt_duration_as_secs(&start.elapsed())
             );
-            let (key, compilation, weak_toolchain_key) = match res {
+            let (key, compilation, weak_toolchain_key, details) = match res {
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
                     return f_ok((CompileResult::Error, output));
                 }
@@ -219,8 +219,8 @@ where
                     key,
                     compilation,
                     weak_toolchain_key,
-                    details: _,
-                }) => (key, compilation, weak_toolchain_key),
+                    details,
+                }) => (key, compilation, weak_toolchain_key, details),
             };
             trace!("[{}]: Hash key: {}", out_pretty, key);
             // If `ForceRecache` is enabled, we won't check the cache.
@@ -386,6 +386,19 @@ where
                                     if !compiler_result.stderr.is_empty() {
                                         let mut stderr = &compiler_result.stderr[..];
                                         entry.put_object("stderr", &mut stderr, None)?;
+                                    }
+
+                                    if let Some(details) = details {
+                                        let mut bytes: Vec<u8> = Vec::new();
+                                        for (annotation, value) in details {
+                                            bytes.extend(annotation.bytes());
+                                            bytes.extend(": ".bytes());
+                                            bytes.extend(value.bytes());
+                                            bytes.extend("\n".bytes());
+                                        }
+                                        let mut bytes: &[u8] = &bytes[..];
+                                        entry.put_object("hash_details", &mut bytes, None)?;
+                                        // entry.put_object("command", details, None);
                                     }
 
                                     // Try to finish storing the newly-written cache
