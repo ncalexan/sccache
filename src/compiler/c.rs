@@ -630,7 +630,7 @@ pub fn hash_key(
     m.update(language.as_str().as_bytes(), &"language");
     for arg in arguments {
         arg.hash(&mut HashToDigest { digest: &mut m, annotation: &format!("arg {:?}", arg) });
-        info!("XXX");
+        debug!("Z");
     }
     for hash in extra_hashes {
         m.update(hash.as_bytes(), &"extra hash");

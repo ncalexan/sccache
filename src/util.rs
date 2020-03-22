@@ -37,7 +37,6 @@ pub type Details = Vec<(String, String)>;
 #[derive(Clone)]
 pub struct Digest {
     inner: blake3_Hasher,
-    inner: Context,
     details: Option<Details>,
 }
 
@@ -94,9 +93,9 @@ impl Digest {
     pub fn update(&mut self, bytes: &[u8], annotation: &dyn Display) {
         self.details.as_mut().map(|details| {
             if log_enabled!(Debug) {
-                let mut fragment = Context::new(&SHA512);
+                let mut fragment = blake3_Hasher::new();
                 fragment.update(bytes);
-                let fragment = hex(fragment.finish().as_ref());
+                let fragment = hex(fragment.finalize().as_bytes());
                 debug!("Digest: {} -> '{}'", annotation, fragment);
                 details.push((format!("{}", annotation), fragment))
             }
@@ -352,9 +351,6 @@ pub struct HashToDigest<'a> {
 
 impl<'a> Hasher for HashToDigest<'a> {
     fn write(&mut self, bytes: &[u8]) {
-        info!("YYY {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}", bytes.len(),
-              bytes.get(0), bytes.get(1), bytes.get(2), bytes.get(3),
-              bytes.get(4), bytes.get(5), bytes.get(6), bytes.get(7));
         self.digest.update(bytes, self.annotation)
     }
 
