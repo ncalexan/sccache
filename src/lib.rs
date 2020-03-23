@@ -29,6 +29,12 @@ use jsonwebtoken as jwt;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+#[macro_use(slog_o,slog_debug,slog_error,slog_info,slog_warn)]
+extern crate slog;
+// extern crate slog_stdlog;
+// extern crate slog_scope;
+// extern crate slog_term;
+// extern crate slog_async;
 #[cfg(feature = "rouille")]
 #[macro_use(router)]
 extern crate rouille;
@@ -64,20 +70,39 @@ pub mod util;
 use std::env;
 use std::io::Write;
 
-pub fn main() {
-    init_logging();
-    std::process::exit(match cmdline::parse() {
-        Ok(cmd) => match commands::run_command(cmd) {
-            Ok(s) => s,
-            Err(e) => {
-                let stderr = &mut std::io::stderr();
-                writeln!(stderr, "error: {}", e).unwrap();
+use slog::Drain;
 
-                for e in e.iter().skip(1) {
-                    writeln!(stderr, "caused by: {}", e).unwrap();
-                }
-                2
-            }
+pub fn main() {
+    let _guard = init_logging();
+
+    std::process::exit(match cmdline::parse() {
+        Ok(cmd) => {
+            // chrono::offset::Utc::now().timestamp()
+            let logger = if let cmdline::Command::Compile { .. } = cmd {
+                slog_scope::logger().new(slog_o!("x-request-id" => 1))
+            } else {
+                slog_scope::logger().new(slog_o!())
+            };
+
+            slog_error!(slog_scope::logger(), "foo"; "cmd" => format!("{:?}", cmd));
+
+            slog_scope::scope(// &slog_scope::logger().new(slog_o!("x-request-id" => 2)),
+                &logger,
+                              || {
+                                  match commands::run_command(cmd) {
+                                      Ok(s) => s,
+                                      Err(e) => {
+                                          let stderr = &mut std::io::stderr();
+                                          writeln!(stderr, "error: {}", e).unwrap();
+
+                                          for e in e.iter().skip(1) {
+                                              writeln!(stderr, "caused by: {}", e).unwrap();
+                                          }
+                                          2
+                                      }
+                                  }
+                              }
+            )
         },
         Err(e) => {
             println!("sccache: {}", e);
@@ -91,11 +116,26 @@ pub fn main() {
     });
 }
 
-fn init_logging() {
+fn init_logging() -> Option<slog_scope::GlobalLoggerGuard> {
     if env::var("RUST_LOG").is_ok() {
-        match env_logger::try_init() {
-            Ok(_) => (),
-            Err(e) => panic!(format!("Failed to initalize logging: {:?}", e)),
-        }
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_envlogger::new(drain);
+        let drain = slog_async::Async::new(drain).chan_size(2048).build().fuse();
+        let logger = slog::Logger::root(drain, slog_o!("version" => env!("CARGO_PKG_VERSION")));
+
+        let scope_guard = slog_scope::set_global_logger(logger);
+        let _log_guard = slog_stdlog::init().unwrap();
+
+        // Note: this `info!(...)` macro comes from `log` crate
+        info!("standard logging redirected to slog");
+
+        // match env_logger::try_init() {
+        //     Ok(_) => (),
+        //     Err(e) => panic!(format!("Failed to initalize logging: {:?}", e)),
+        // }
+        Some(scope_guard)
+    } else {
+        None
     }
 }

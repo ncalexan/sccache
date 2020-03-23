@@ -29,6 +29,7 @@ arg_enum! {
 }
 
 /// A specific command to run.
+#[derive(Debug)]
 pub enum Command {
     /// Show cache statistics and exit.
     ShowStats(StatsFormat),

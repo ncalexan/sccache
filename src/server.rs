@@ -691,7 +691,52 @@ where
     type Future = SFuture<Self::Response>;
 
     fn call(&mut self, req: SccacheRequest) -> Self::Future {
-        trace!("handle_client");
+            // let logger = if let cmdline::Command::Compile { .. } = cmd {
+            //     slog_scope::logger().new(slog_o!("x-request-id" => 1))
+            // } else {
+            //     slog_scope::logger().new(slog_o!())
+            // };
+
+            // slog_error!(slog_scope::logger(), "foo"; "cmd" => format!("{:?}", cmd));
+
+        slog_scope::scope(&slog_scope::logger().new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp())),
+                          || { self._call(req) })
+    }
+
+    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
+        Ok(Async::Ready(()))
+    }
+}
+
+impl<C> SccacheService<C>
+where
+    C: CommandCreatorSync,
+{
+    pub fn new(
+        dist_client: DistClientContainer,
+        storage: Arc<dyn Storage>,
+        client: &Client,
+        pool: CpuPool,
+        tx: mpsc::Sender<ServerMessage>,
+        info: ActiveInfo,
+    ) -> SccacheService<C> {
+        SccacheService {
+            stats: Rc::new(RefCell::new(ServerStats::default())),
+            dist_client: Rc::new(dist_client),
+            storage,
+            compilers: Rc::new(RefCell::new(HashMap::new())),
+            compiler_proxies: Rc::new(RefCell::new(HashMap::new())),
+            pool,
+            creator: C::new(client),
+            tx,
+            info,
+        }
+    }
+
+    fn _call(&mut self, req: SccacheRequest) -> <SccacheService<C> as Service<SccacheRequest>>::Future {
+        warn!("handle_client");
+
+        let logger = slog_scope::logger();
 
         // Opportunistically let channel know that we've received a request. We
         // ignore failures here as well as backpressure as it's not imperative
@@ -700,7 +745,7 @@ where
 
         let res: SFuture<Response> = match req.into_inner() {
             Request::Compile(compile) => {
-                debug!("handle_client: compile");
+                slog_debug!(logger, "handle_client: compile");
                 self.stats.borrow_mut().compile_requests += 1;
                 return self.handle_compile(compile);
             }
@@ -732,36 +777,6 @@ where
         };
 
         Box::new(res.map(Message::WithoutBody))
-    }
-
-    fn poll_ready(&mut self) -> Poll<(), Self::Error> {
-        Ok(Async::Ready(()))
-    }
-}
-
-impl<C> SccacheService<C>
-where
-    C: CommandCreatorSync,
-{
-    pub fn new(
-        dist_client: DistClientContainer,
-        storage: Arc<dyn Storage>,
-        client: &Client,
-        pool: CpuPool,
-        tx: mpsc::Sender<ServerMessage>,
-        info: ActiveInfo,
-    ) -> SccacheService<C> {
-        SccacheService {
-            stats: Rc::new(RefCell::new(ServerStats::default())),
-            dist_client: Rc::new(dist_client),
-            storage,
-            compilers: Rc::new(RefCell::new(HashMap::new())),
-            compiler_proxies: Rc::new(RefCell::new(HashMap::new())),
-            pool,
-            creator: C::new(client),
-            tx,
-            info,
-        }
     }
 
     fn bind<T>(mut self, socket: T) -> impl Future<Item = (), Error = Error>
@@ -854,6 +869,7 @@ where
         )
     }
 
+    
 
 
     /// Look up compiler info from the cache for the compiler `path`.
