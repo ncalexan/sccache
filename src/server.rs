@@ -1108,7 +1108,7 @@ where
             cwd,
             env_vars,
             cache_control,
-            self.pool.clone(),
+            self.pool.clone(), self.logger.clone(),
         );
         let me = self.clone();
         let kind = compiler.kind();

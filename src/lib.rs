@@ -29,12 +29,8 @@ use jsonwebtoken as jwt;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[macro_use(slog_o,slog_debug,slog_error,slog_info,slog_warn)]
+#[macro_use(slog_o,slog_trace,slog_debug,slog_error,slog_info,slog_warn)]
 extern crate slog;
-// extern crate slog_stdlog;
-// extern crate slog_scope;
-// extern crate slog_term;
-// extern crate slog_async;
 #[cfg(feature = "rouille")]
 #[macro_use(router)]
 extern crate rouille;
@@ -84,25 +80,25 @@ pub fn main() {
                 slog_scope::logger().new(slog_o!())
             };
 
-            slog_error!(slog_scope::logger(), "foo"; "cmd" => format!("{:?}", cmd));
+            // slog_error!(slog_scope::logger(), "foo"; "cmd" => format!("{:?}", cmd));
 
-            slog_scope::scope(// &slog_scope::logger().new(slog_o!("x-request-id" => 2)),
-                &logger,
-                              || {
-                                  match commands::run_command(cmd) {
-                                      Ok(s) => s,
-                                      Err(e) => {
-                                          let stderr = &mut std::io::stderr();
-                                          writeln!(stderr, "error: {}", e).unwrap();
+            // slog_scope::scope(// &slog_scope::logger().new(slog_o!("x-request-id" => 2)),
+            //     &logger,
+            //                   || {
+            match commands::run_command(cmd, logger) {
+                Ok(s) => s,
+                Err(e) => {
+                    let stderr = &mut std::io::stderr();
+                    writeln!(stderr, "error: {}", e).unwrap();
 
-                                          for e in e.iter().skip(1) {
-                                              writeln!(stderr, "caused by: {}", e).unwrap();
-                                          }
-                                          2
-                                      }
-                                  }
-                              }
-            )
+                    for e in e.iter().skip(1) {
+                        writeln!(stderr, "caused by: {}", e).unwrap();
+                    }
+                    2
+                }
+            }
+            //                   }
+            // )
         },
         Err(e) => {
             println!("sccache: {}", e);
@@ -122,7 +118,7 @@ fn init_logging() -> Option<slog_scope::GlobalLoggerGuard> {
         let drain = slog_term::FullFormat::new(decorator).build().fuse();
         let drain = slog_envlogger::new(drain);
         let drain = slog_async::Async::new(drain).chan_size(2048).build().fuse();
-        let logger = slog::Logger::root(drain, slog_o!("version" => env!("CARGO_PKG_VERSION")));
+        let logger = slog::Logger::root(drain, slog_o!()); // "version" => env!("CARGO_PKG_VERSION")));
 
         let scope_guard = slog_scope::set_global_logger(logger);
         let _log_guard = slog_stdlog::init().unwrap();

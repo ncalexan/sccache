@@ -25,6 +25,7 @@ use crate::mock_command::CommandCreatorSync;
 use crate::util::{hash_all, Digest, HashToDigest};
 use futures::Future;
 use futures_cpupool::CpuPool;
+use slog::Logger;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -47,6 +48,7 @@ where
     executable: PathBuf,
     executable_digest: String,
     compiler: I,
+    logger: Logger,
 }
 
 /// A generic implementation of the `CompilerHasher` trait for C/C++ compilers.
@@ -59,6 +61,7 @@ where
     executable: PathBuf,
     executable_digest: String,
     compiler: I,
+    logger: Logger,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -194,12 +197,14 @@ impl<I> CCompiler<I>
 where
     I: CCompilerImpl,
 {
-    pub fn new(compiler: I, executable: PathBuf, pool: &CpuPool) -> SFuture<CCompiler<I>> {
+    pub fn new(compiler: I, executable: PathBuf, pool: &CpuPool, logger: &Logger) -> SFuture<CCompiler<I>> {
+        let logger = logger.clone();
         Box::new(
-            Digest::file(executable.clone(), &pool).map(move |digest| CCompiler {
+            Digest::file(executable.clone(), &pool, &logger).map(move |digest| CCompiler {
                 executable,
                 executable_digest: digest,
                 compiler,
+                logger,
             }),
         )
     }
@@ -227,6 +232,7 @@ impl<T: CommandCreatorSync, I: CCompilerImpl> Compiler<T> for CCompiler<I> {
                 executable: self.executable.clone(),
                 executable_digest: self.executable_digest.clone(),
                 compiler: self.compiler.clone(),
+                logger: self.logger.clone(),
             })),
             CompilerArguments::CannotCache(why, extra_info) => {
                 CompilerArguments::CannotCache(why, extra_info)
@@ -251,7 +257,7 @@ where
         cwd: PathBuf,
         env_vars: Vec<(OsString, OsString)>,
         may_dist: bool,
-        pool: &CpuPool,
+        pool: &CpuPool, logger: &Logger,
         rewrite_includes_only: bool,
     ) -> SFuture<HashResult> {
         let me = *self;
@@ -260,6 +266,7 @@ where
             executable,
             executable_digest,
             compiler,
+            logger,
         } = me;
         let result = compiler.preprocess(
             creator,
@@ -276,7 +283,7 @@ where
             e
         });
         let out_pretty = parsed_args.output_pretty().into_owned();
-        let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone());
+        let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone(), &logger);
         let outputs = parsed_args.outputs.clone();
         let args_cwd = cwd.clone();
 
@@ -364,9 +371,10 @@ where
         self.parsed_args.color_mode
     }
 
-    fn output_pretty(&self) -> Cow<'_, str> {
-        self.parsed_args.output_pretty()
-    }
+    // fn logger(&self) -> Logger {
+    //     let v: String = self.parsed_args.output_pretty().to_string();
+    //     self.logger.new(slog_o!()) // "name", v))
+    // }
 
     fn box_clone(&self) -> Box<dyn CompilerHasher<T>> {
         Box::new((*self).clone())

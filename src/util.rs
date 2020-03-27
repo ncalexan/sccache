@@ -19,6 +19,7 @@ use futures::{future, Future};
 use futures_cpupool::CpuPool;
 use log::Level::Debug;
 use serde::Serialize;
+use slog::Logger;
 use std::ffi::{OsStr, OsString};
 use std::fmt::Display;
 use std::fs::File;
@@ -46,11 +47,11 @@ impl Digest {
 
     /// Calculate the BLAKE3 digest of the contents of `path`, running
     /// the actual hash computation on a background thread in `pool`.
-    pub fn file<T>(path: T, pool: &CpuPool) -> SFuture<String>
+    pub fn file<T>(path: T, pool: &CpuPool, logger: &Logger) -> SFuture<String>
     where
         T: AsRef<Path>,
     {
-        Self::reader(path.as_ref().to_owned(), pool)
+        Self::reader(path.as_ref().to_owned(), pool, logger)
     }
 
     /// Calculate the BLAKE3 digest of the contents read from `reader`.
@@ -72,7 +73,7 @@ impl Digest {
 
     /// Calculate the BLAKE3 digest of the contents of `path`, running
     /// the actual hash computation on a background thread in `pool`.
-    pub fn reader(path: PathBuf, pool: &CpuPool) -> SFuture<String> {
+    pub fn reader(path: PathBuf, pool: &CpuPool, logger: &Logger) -> SFuture<String> {
         Box::new(pool.spawn_fn(move || -> Result<_> {
             let reader = File::open(&path)
                 .chain_err(|| format!("Failed to open file for hashing: {:?}", path))?;
@@ -119,7 +120,7 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Calculate the digest of each file in `files` on background threads in
 /// `pool`.
-pub fn hash_all(files: &[PathBuf], pool: &CpuPool) -> SFuture<Vec<String>> {
+pub fn hash_all(files: &[PathBuf], pool: &CpuPool, logger: &Logger) -> SFuture<Vec<String>> {
     let start = time::Instant::now();
     let count = files.len();
     let pool = pool.clone();
@@ -127,7 +128,7 @@ pub fn hash_all(files: &[PathBuf], pool: &CpuPool) -> SFuture<Vec<String>> {
         future::join_all(
             files
                 .iter()
-                .map(move |f| Digest::file(f, &pool))
+                .map(move |f| Digest::file(f, &pool, &logger))
                 .collect::<Vec<_>>(),
         )
         .map(move |hashes| {

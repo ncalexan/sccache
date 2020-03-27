@@ -31,7 +31,7 @@ use futures_cpupool::CpuPool;
 use log::Level::Trace;
 #[cfg(feature = "dist-client")]
 use lru_disk_cache::{LruCache, Meter};
-#[cfg(feature = "dist-client")]
+use slog::Logger;
 #[cfg(feature = "dist-client")]
 use std::borrow::Borrow;
 use std::borrow::Cow;
@@ -205,7 +205,7 @@ fn get_source_files<T>(
     arguments: &[OsString],
     cwd: &Path,
     env_vars: &[(OsString, OsString)],
-    pool: &CpuPool,
+    pool: &CpuPool, logger: &Logger
 ) -> SFuture<Vec<PathBuf>>
 where
     T: CommandCreatorSync,
@@ -354,7 +354,7 @@ impl Rust {
         env_vars: &[(OsString, OsString)],
         rustc_verbose_version: &str,
         dist_archive: Option<PathBuf>,
-        pool: CpuPool,
+        pool: CpuPool, logger: Logger,
     ) -> SFuture<Rust>
     where
         T: CommandCreatorSync,
@@ -421,7 +421,7 @@ impl Rust {
                     None
                 },
             };
-            hash_all(&libs, &pool).map(move |digests| {
+            hash_all(&libs, &pool, &logger).map(move |digests| {
                 Rust {
                     executable,
                     host,
@@ -1220,7 +1220,7 @@ where
         cwd: PathBuf,
         env_vars: Vec<(OsString, OsString)>,
         _may_dist: bool,
-        pool: &CpuPool,
+        pool: &CpuPool, logger: &Logger,
         _rewrite_includes_only: bool,
     ) -> SFuture<HashResult> {
         let me = *self;
@@ -1275,6 +1275,7 @@ where
             .collect::<Vec<_>>();
         // Find all the source files and hash them
         let source_hashes_pool = pool.clone();
+        let source_hashes_logger = logger.clone();
         let source_files = get_source_files(
             creator,
             &crate_name,
@@ -1282,20 +1283,20 @@ where
             &filtered_arguments,
             &cwd,
             &env_vars,
-            pool,
+            pool, logger,
         );
         let source_files_and_hashes = source_files.and_then(move |source_files| {
-            hash_all(&source_files, &source_hashes_pool)
+            hash_all(&source_files, &source_hashes_pool, &source_hashes_logger)
                 .map(|source_hashes| (source_files, source_hashes))
         });
         // Hash the contents of the externs listed on the commandline.
         trace!("[{}]: hashing {} externs", crate_name, externs.len());
         let abs_externs = externs.iter().map(|e| cwd.join(e)).collect::<Vec<_>>();
-        let extern_hashes = hash_all(&abs_externs, pool);
+        let extern_hashes = hash_all(&abs_externs, pool, logger);
         // Hash the contents of the staticlibs listed on the commandline.
         trace!("[{}]: hashing {} staticlibs", crate_name, staticlibs.len());
         let abs_staticlibs = staticlibs.iter().map(|s| cwd.join(s)).collect::<Vec<_>>();
-        let staticlib_hashes = hash_all(&abs_staticlibs, pool);
+        let staticlib_hashes = hash_all(&abs_staticlibs, pool, logger);
         let creator = creator.clone();
         let hashes = source_files_and_hashes.join3(extern_hashes, staticlib_hashes);
         Box::new(hashes.and_then(
@@ -1492,9 +1493,9 @@ where
         self.parsed_args.color_mode
     }
 
-    fn output_pretty(&self) -> Cow<'_, str> {
-        Cow::Borrowed(&self.parsed_args.crate_name)
-    }
+    // fn logger(&self) -> Logger {
+    //     self.logger.new(slog_o!("name", "test")) // self.parsed_args.crate_name))
+    // }
 
     fn box_clone(&self) -> Box<dyn CompilerHasher<T>> {
         Box::new((*self).clone())

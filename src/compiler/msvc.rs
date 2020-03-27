@@ -24,6 +24,7 @@ use futures::future::Future;
 use futures_cpupool::CpuPool;
 use local_encoding::{Encoder, Encoding};
 use log::Level::Debug;
+use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
@@ -102,12 +103,12 @@ pub fn detect_showincludes_prefix<T>(
     exe: &OsStr,
     is_clang: bool,
     env: Vec<(OsString, OsString)>,
-    pool: &CpuPool,
+    pool: &CpuPool, logger: &Logger,
 ) -> SFuture<String>
 where
     T: CommandCreatorSync,
 {
-    let write = write_temp_file(pool, "test.c".as_ref(), b"#include \"test.h\"\n".to_vec());
+    let write = write_temp_file(pool, logger, "test.c".as_ref(), b"#include \"test.h\"\n".to_vec());
 
     let exe = exe.to_os_string();
     let mut creator = creator.clone();

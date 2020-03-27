@@ -28,6 +28,7 @@ use crate::util::{fmt_duration_as_secs, ref_env, run_input_output};
 use filetime::FileTime;
 use futures::Future;
 use futures_cpupool::CpuPool;
+use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -163,7 +164,7 @@ where
         cwd: PathBuf,
         env_vars: Vec<(OsString, OsString)>,
         may_dist: bool,
-        pool: &CpuPool,
+        pool: &CpuPool, logger: &Logger,
         rewrite_includes_only: bool,
     ) -> SFuture<HashResult>;
 
@@ -182,10 +183,12 @@ where
         cwd: PathBuf,
         env_vars: Vec<(OsString, OsString)>,
         cache_control: CacheControl,
-        pool: CpuPool,
+        pool: CpuPool, logger: Logger,
     ) -> SFuture<(CompileResult, process::Output)> {
-        let out_pretty = self.output_pretty().into_owned();
-        debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
+        // let out_pretty = self.output_pretty().into_owned();
+        let out_pretty = "out_pretty";
+        // let logger = self.logger();
+        slog_debug!(logger, "get_cached_or_compile"; "arguments" => format!("{:?}", arguments));
         let start = Instant::now();
         let may_dist = match dist_client {
             Ok(Some(_)) => true,
@@ -200,14 +203,13 @@ where
             cwd.clone(),
             env_vars,
             may_dist,
-            &pool,
+            &pool, &logger,
             rewrite_includes_only,
         );
         Box::new(result.then(move |res| -> SFuture<_> {
-            debug!(
-                "[{}]: generate_hash_key took {}",
-                out_pretty,
-                fmt_duration_as_secs(&start.elapsed())
+            slog_debug!(logger,
+                "generate_hash_key";
+                "elapsed" => fmt_duration_as_secs(&start.elapsed())
             );
             let (key, compilation, weak_toolchain_key) = match res {
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
@@ -220,7 +222,7 @@ where
                     weak_toolchain_key,
                 }) => (key, compilation, weak_toolchain_key),
             };
-            trace!("[{}]: Hash key: {}", out_pretty, key);
+            // slog_trace!(logger, "[{}]: Hash key: {}", out_pretty, key);
             // If `ForceRecache` is enabled, we won't check the cache.
             let start = Instant::now();
             let cache_status = if cache_control == CacheControl::ForceRecache {
@@ -244,11 +246,11 @@ where
 
                 let miss_type = match result {
                     Ok(Cache::Hit(mut entry)) => {
-                        debug!(
-                            "[{}]: Cache hit in {}",
-                            out_pretty,
-                            fmt_duration_as_secs(&duration)
-                        );
+                        // slog_debug!(logger,
+                        //     "[{}]: Cache hit in {}",
+                        //     out_pretty,
+                        //     fmt_duration_as_secs(&duration)
+                        // );
                         let mut stdout = Vec::new();
                         let mut stderr = Vec::new();
                         drop(entry.get_object("stdout", &mut stdout));
@@ -280,7 +282,7 @@ where
                         return Box::new(write.map(|_| (result, output))) as SFuture<_>;
                     }
                     Ok(Cache::Miss) => {
-                        debug!(
+                        slog_debug!(logger,
                             "[{}]: Cache miss in {}",
                             out_pretty,
                             fmt_duration_as_secs(&duration)
@@ -288,7 +290,7 @@ where
                         MissType::Normal
                     }
                     Ok(Cache::Recache) => {
-                        debug!(
+                        slog_debug!(logger,
                             "[{}]: Cache recache in {}",
                             out_pretty,
                             fmt_duration_as_secs(&duration)
@@ -297,18 +299,18 @@ where
                     }
                     Err(err) => {
                         if err.is_elapsed() {
-                            debug!(
+                            slog_debug!(logger,
                                 "[{}]: Cache timed out {}",
                                 out_pretty,
                                 fmt_duration_as_secs(&duration)
                             );
                             MissType::TimedOut
                         } else {
-                            error!("[{}]: Cache read error: {}", out_pretty, err);
+                            slog_error!(logger, "[{}]: Cache read error: {}", out_pretty, err);
                             if err.is_inner() {
                                 let err = err.into_inner().unwrap();
                                 for e in err.iter().skip(1) {
-                                    error!("[{}] \t{}", out_pretty, e);
+                                    slog_error!(logger, "[{}] \t{}", out_pretty, e);
                                 }
                             }
                             MissType::CacheReadError
@@ -324,14 +326,15 @@ where
                     cwd,
                     compilation,
                     weak_toolchain_key,
-                    out_pretty.clone(),
+                    out_pretty.clone().to_string(), // XXX
+                    &logger,
                 );
 
                 Box::new(
                     compile.and_then(move |(cacheable, dist_type, compiler_result)| {
                         let duration = start.elapsed();
                         if !compiler_result.status.success() {
-                            debug!(
+                            slog_debug!(logger,
                                 "[{}]: Compiled but failed, not storing in cache",
                                 out_pretty
                             );
@@ -340,10 +343,10 @@ where
                         }
                         if cacheable != Cacheable::Yes {
                             // Not cacheable
-                            debug!("[{}]: Compiled but not cacheable", out_pretty);
+                            slog_debug!(logger, "[{}]: Compiled but not cacheable", out_pretty);
                             return f_ok((CompileResult::NotCacheable, compiler_result));
                         }
-                        debug!(
+                        slog_debug!(logger,
                             "[{}]: Compiled in {}, storing in cache",
                             out_pretty,
                             fmt_duration_as_secs(&duration)
@@ -377,17 +380,17 @@ where
                                     // entry. We'll get the result back elsewhere.
                                     let future = storage.put(&key, entry).then(move |res| {
                                         match res {
-                                            Ok(_) => debug!(
+                                            Ok(_) => slog_debug!(logger,
                                                 "[{}]: Stored in cache successfully!",
                                                 out_pretty
                                             ),
-                                            Err(ref e) => debug!(
+                                            Err(ref e) => slog_debug!(logger,
                                                 "[{}]: Cache write error: {:?}",
                                                 out_pretty, e
                                             ),
                                         }
                                         res.map(|duration| CacheWriteInfo {
-                                            object_file_pretty: out_pretty,
+                                            object_file_pretty: out_pretty.to_string(),
                                             duration,
                                         })
                                     });
@@ -411,7 +414,9 @@ where
     ///
     /// This is primarily intended for debug logging and such, not for actual
     /// artifact generation.
-    fn output_pretty(&self) -> Cow<'_, str>;
+    //fn output_pretty(&self) -> Cow<'_, str>;
+
+    // fn logger(&self) -> Logger;
 
     fn box_clone(&self) -> Box<dyn CompilerHasher<T>>;
 }
@@ -437,7 +442,7 @@ where
         Err(e) => return f_err(e),
     };
 
-    debug!("[{}]: Compiling locally", out_pretty);
+    slog_debug!(logger, "[{}]: Compiling locally", out_pretty);
     Box::new(
         compile_cmd
             .execute(&creator)
@@ -452,13 +457,16 @@ fn dist_or_local_compile<T>(
     cwd: PathBuf,
     compilation: Box<dyn Compilation>,
     weak_toolchain_key: String,
-    out_pretty: String,
+    out_pretty: String, // XXX
+    logger: &Logger,
 ) -> SFuture<(Cacheable, DistType, process::Output)>
 where
     T: CommandCreatorSync,
 {
     use futures::future;
     use std::io;
+
+    let logger = logger.clone();
 
     let rewrite_includes_only = match dist_client {
         Ok(Some(ref client)) => client.rewrite_includes_only(),
@@ -476,7 +484,7 @@ where
     let dist_client = match dist_client {
         Ok(Some(dc)) => dc,
         Ok(None) => {
-            debug!("[{}]: Compiling locally", out_pretty);
+            slog_debug!(&logger, "[{}]: Compiling locally", out_pretty);
             return Box::new(
                 compile_cmd
                     .execute(&creator)
@@ -488,17 +496,23 @@ where
         }
     };
 
-    debug!("[{}]: Attempting distributed compilation", out_pretty);
+    slog_debug!(&logger, "[{}]: Attempting distributed compilation", out_pretty);
+    let logger = logger.clone();
+    let logger2 = logger.clone();
+    let logger3 = logger.clone();
+    let logger4 = logger.clone();
+    let logger5 = logger.clone();
     let compile_out_pretty = out_pretty.clone();
     let compile_out_pretty2 = out_pretty.clone();
     let compile_out_pretty3 = out_pretty.clone();
     let compile_out_pretty4 = out_pretty;
     let local_executable = compile_cmd.executable.clone();
     let local_executable2 = local_executable.clone();
+
     // TODO: the number of map_errs is subideal, but there's no futures-based carrier trait AFAIK
     Box::new(future::result(dist_compile_cmd.ok_or_else(|| "Could not create distributed compile command".into()))
         .and_then(move |dist_compile_cmd| {
-            debug!("[{}]: Creating distributed compile request", compile_out_pretty);
+            slog_debug!(logger, "[{}]: Creating distributed compile request", compile_out_pretty);
             let dist_output_paths = compilation.outputs()
                 .map(|(_key, path)| path_transformer.as_dist_abs(&cwd.join(path)))
                 .collect::<Option<_>>()
@@ -507,7 +521,7 @@ where
                 .map(|packagers| (dist_compile_cmd, packagers, dist_output_paths))
         })
         .and_then(move |(mut dist_compile_cmd, (inputs_packager, toolchain_packager, outputs_rewriter), dist_output_paths)| {
-            debug!("[{}]: Identifying dist toolchain for {:?}", compile_out_pretty2, local_executable);
+            slog_debug!(logger2, "[{}]: Identifying dist toolchain for {:?}", compile_out_pretty2, local_executable);
             dist_client.put_toolchain(&local_executable, &weak_toolchain_key, toolchain_packager)
                 .and_then(|(dist_toolchain, maybe_dist_compile_executable)| {
                     let mut tc_archive = None;
@@ -519,12 +533,12 @@ where
                 })
         })
         .and_then(move |(dist_client, dist_compile_cmd, dist_toolchain, inputs_packager, outputs_rewriter, dist_output_paths, tc_archive)| {
-            debug!("[{}]: Requesting allocation", compile_out_pretty3);
+            slog_debug!(logger3, "[{}]: Requesting allocation", compile_out_pretty3);
             dist_client.do_alloc_job(dist_toolchain.clone())
                 .and_then(move |jares| {
                     let alloc = match jares {
                         dist::AllocJobResult::Success { job_alloc, need_toolchain: true } => {
-                            debug!("[{}]: Sending toolchain {} for job {}",
+                            slog_debug!(logger3, "[{}]: Sending toolchain {} for job {}",
                                 compile_out_pretty3, dist_toolchain.archive_id, job_alloc.job_id);
                             Box::new(dist_client.do_submit_toolchain(job_alloc.clone(), dist_toolchain)
                                 .and_then(move |res| {
@@ -547,7 +561,7 @@ where
                         .and_then(move |job_alloc| {
                             let job_id = job_alloc.job_id;
                             let server_id = job_alloc.server_id;
-                            debug!("[{}]: Running job", compile_out_pretty3);
+                            slog_debug!(logger3, "[{}]: Running job", compile_out_pretty3);
                             dist_client.do_run_job(job_alloc, dist_compile_cmd, dist_output_paths, inputs_packager)
                                 .map(move |res| ((job_id, server_id), res))
                                 .chain_err(move || format!("could not run distributed compilation job on {:?}", server_id))
@@ -558,7 +572,7 @@ where
                         dist::RunJobResult::Complete(jc) => jc,
                         dist::RunJobResult::JobNotFound => bail!("Job {} not found on server", job_id),
                     };
-                    info!("fetched {:?}", jc.outputs.iter().map(|&(ref p, ref bs)| (p, bs.lens().to_string())).collect::<Vec<_>>());
+                    slog_info!(logger4, "fetched {:?}", jc.outputs.iter().map(|&(ref p, ref bs)| (p, bs.lens().to_string())).collect::<Vec<_>>());
                     let mut output_paths: Vec<PathBuf> = vec![];
                     macro_rules! try_or_cleanup {
                         ($v:expr) => {{
@@ -570,7 +584,7 @@ where
                                     for local_path in output_paths.iter() {
                                         if let Err(e) = fs::remove_file(local_path) {
                                             if e.kind() != io::ErrorKind::NotFound {
-                                                warn!("{} while attempting to clear up {}", e, local_path.display())
+                                                slog_warn!(logger4, "{} while attempting to clear up {}", e, local_path.display())
                                             }
                                         }
                                     }
@@ -617,7 +631,7 @@ where
                      Increase `toolchain_cache_size` or decrease the toolchain archive size.",
                     local_executable2)),
                 _ => {
-                    warn!("[{}]: Could not perform distributed compile, falling back to local: {}", compile_out_pretty4, errmsg);
+                    slog_warn!(logger5, "[{}]: Could not perform distributed compile, falling back to local: {}", compile_out_pretty4, errmsg);
                     Box::new(compile_cmd.execute(&creator).map(|o| (DistType::Error, o)))
                 }
             }
@@ -864,7 +878,7 @@ pub enum CacheControl {
 /// Note that when the `TempDir` is dropped it will delete all of its contents
 /// including the path returned.
 pub fn write_temp_file(
-    pool: &CpuPool,
+    pool: &CpuPool, logger: &Logger,
     path: &Path,
     contents: Vec<u8>,
 ) -> SFuture<(TempDir, PathBuf)> {
@@ -886,13 +900,13 @@ fn detect_compiler<T>(
     executable: &Path,
     cwd: &Path,
     env: &[(OsString, OsString)],
-    pool: &CpuPool,
+    pool: &CpuPool, logger: &Logger,
     dist_archive: Option<PathBuf>,
 ) -> SFuture<(Box<dyn Compiler<T>>, Option<Box<dyn CompilerProxy<T>>>)>
 where
     T: CommandCreatorSync,
 {
-    trace!("detect_compiler: {}", executable.display());
+    slog_trace!(logger, "detect_compiler: {}", executable.display());
 
     // First, see if this looks like rustc.
     let filename = match executable.file_stem() {
@@ -926,19 +940,21 @@ where
     let env2 = env.to_owned();
     let env3 = env.to_owned();
     let pool = pool.clone();
+    let logger = logger.clone();
+    let logger2 = logger.clone();
     let cwd = cwd.to_owned().clone();
     Box::new(
         rustc_vv
             .and_then(move |rustc_vv| match rustc_vv {
             Some(Ok(rustc_verbose_version)) => {
-                debug!("Found rustc");
+                slog_debug!(logger, "Found rustc");
 
                 Box::new(
                     RustupProxy::find_proxy_executable::<T>(&executable2,"rustup", creator, &env1)
                         .and_then(move |proxy : Result<Option<RustupProxy>>| -> SFuture<(Option<RustupProxy>, PathBuf)> {
                             match proxy {
                                 Ok(Some(proxy)) => {
-                                    trace!("Found rustup proxy executable");
+                                    slog_trace!(logger, "Found rustup proxy executable");
                                     let fut =
                                         proxy
                                             .resolve_proxied_executable(creator1, cwd, &env2)
@@ -946,11 +962,11 @@ where
                                                 // take the pathbuf for rustc as resolved by the proxy
                                                 match res {
                                                     Ok((resolved_path, _time)) => {
-                                                        trace!("Resolved path with rustup proxy {:?}", &resolved_path);
+                                                        slog_trace!(logger, "Resolved path with rustup proxy {:?}", &resolved_path);
                                                         f_ok((Some(proxy), resolved_path))
                                                     },
                                                     Err(e) => {
-                                                        trace!("Could not resolve compiler with rustup proxy: {}", e);
+                                                        slog_trace!(logger, "Could not resolve compiler with rustup proxy: {}", e);
                                                         f_ok((None, executable))
                                                     },
                                                 }
@@ -958,11 +974,11 @@ where
                                     Box::new(fut)
                                 },
                                 Ok(None) => {
-                                    trace!("Did not find rustup");
+                                    slog_trace!(logger, "Did not find rustup");
                                     f_ok((None, executable))
                                 },
                                 Err(e) => {
-                                    trace!("Did not find rustup due to {}", e);
+                                    slog_trace!(logger, "Did not find rustup due to {}", e);
                                     f_ok((None, executable))
                                 },
                             }
@@ -979,7 +995,7 @@ where
                                         )
                                     })
                                     .unwrap_or_else(|_e| {
-                                        trace!("Compiling rust without proxy");
+                                        slog_trace!(logger2, "Compiling rust without proxy");
                                         (None, executable2)
                                     });
 
@@ -989,7 +1005,7 @@ where
                                 &env3,
                                 &rustc_verbose_version,
                                 dist_archive,
-                                pool,
+                                pool, logger2
                             )
                             .map(|c| {
                                 (
@@ -1003,7 +1019,7 @@ where
             }
             Some(Err(e)) => f_err(e),
             None => {
-                let cc = detect_c_compiler(creator, executable, env1.to_vec(), pool);
+                let cc = detect_c_compiler(creator, executable, env1.to_vec(), pool, &logger);
                 Box::new(cc.map(|c : Box<dyn Compiler<T>>| { (c, None ) }))
             },
         })
@@ -1015,11 +1031,14 @@ fn detect_c_compiler<T>(
     executable: PathBuf,
     env: Vec<(OsString, OsString)>,
     pool: CpuPool,
+    logger: &Logger,
 ) -> SFuture<Box<dyn Compiler<T>>>
 where
     T: CommandCreatorSync,
 {
-    trace!("detect_c_compiler");
+    let logger = logger.clone();
+    let logger2 = logger.clone();
+    slog_trace!(logger, "detect_c_compiler");
 
     let test = b"#if defined(_MSC_VER) && defined(__clang__)
 msvc-clang
@@ -1034,7 +1053,7 @@ diab
 #endif
 "
     .to_vec();
-    let write = write_temp_file(&pool, "testfile.c".as_ref(), test);
+    let write = write_temp_file(&pool, &logger, "testfile.c".as_ref(), test);
 
     let mut cmd = creator.clone().new_command_sync(&executable);
     cmd.stdout(Stdio::piped())
@@ -1042,7 +1061,7 @@ diab
         .envs(env.iter().map(|s| (&s.0, &s.1)));
     let output = write.and_then(move |(tempdir, src)| {
         cmd.arg("-E").arg(src);
-        trace!("compiler {:?}", cmd);
+        slog_trace!(logger, "compiler {:?}", cmd);
         cmd.spawn()
             .and_then(|child| {
                 child
@@ -1064,45 +1083,45 @@ diab
             //TODO: do something smarter here.
             match line {
                 "clang" => {
-                    debug!("Found clang");
+                    slog_debug!(logger, "Found clang");
                     return Box::new(
-                        CCompiler::new(Clang, executable, &pool)
+                        CCompiler::new(Clang, executable, &pool, &logger)
                             .map(|c| Box::new(c) as Box<dyn Compiler<T>>),
                     );
                 }
                 "diab" => {
-                    debug!("Found diab");
+                    slog_debug!(logger, "Found diab");
                     return Box::new(
-                        CCompiler::new(Diab, executable, &pool)
+                        CCompiler::new(Diab, executable, &pool, &logger)
                             .map(|c| Box::new(c) as Box<dyn Compiler<T>>),
                     );
                 }
                 "gcc" => {
-                    debug!("Found GCC");
+                    slog_debug!(logger, "Found GCC");
                     return Box::new(
-                        CCompiler::new(GCC, executable, &pool)
+                        CCompiler::new(GCC, executable, &pool, &logger)
                             .map(|c| Box::new(c) as Box<dyn Compiler<T>>),
                     );
                 }
                 "msvc" | "msvc-clang" => {
                     let is_clang = line == "msvc-clang";
-                    debug!("Found MSVC (is clang: {})", is_clang);
+                    slog_debug!(logger, "Found MSVC (is clang: {})", is_clang);
                     let prefix = msvc::detect_showincludes_prefix(
                         &creator,
                         executable.as_ref(),
                         is_clang,
                         env,
-                        &pool,
+                        &pool, &logger,
                     );
                     return Box::new(prefix.and_then(move |prefix| {
-                        trace!("showIncludes prefix: '{}'", prefix);
+                        slog_trace!(logger2, "showIncludes prefix: '{}'", prefix);
                         CCompiler::new(
                             MSVC {
                                 includes_prefix: prefix,
                                 is_clang,
                             },
                             executable,
-                            &pool,
+                            &pool, &logger2,
                         )
                         .map(|c| Box::new(c) as Box<dyn Compiler<T>>)
                     }));
@@ -1112,9 +1131,9 @@ diab
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!("nothing useful in detection output {:?}", stdout);
-        debug!("compiler status: {}", output.status);
-        debug!("compiler stderr:\n{}", stderr);
+        slog_debug!(logger, "nothing useful in detection output {:?}", stdout);
+        slog_debug!(logger, "compiler status: {}", output.status);
+        slog_debug!(logger, "compiler stderr:\n{}", stderr);
 
         f_err(stderr.into_owned())
     }))
@@ -1126,14 +1145,14 @@ pub fn get_compiler_info<T>(
     executable: &Path,
     cwd: &Path,
     env: &[(OsString, OsString)],
-    pool: &CpuPool,
+    pool: &CpuPool, logger: &Logger,
     dist_archive: Option<PathBuf>,
 ) -> SFuture<(Box<dyn Compiler<T>>, Option<Box<dyn CompilerProxy<T>>>)>
 where
     T: CommandCreatorSync,
 {
     let pool = pool.clone();
-    detect_compiler(creator, executable, cwd, env, &pool, dist_archive)
+    detect_compiler(creator, executable, cwd, env, &pool, &logger, dist_archive)
 }
 
 #[cfg(test)]
