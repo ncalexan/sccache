@@ -34,6 +34,7 @@ use futures::task::{self, Task};
 use futures::{future, stream, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
 use futures_cpupool::CpuPool;
 use number_prefix::{binary_prefix, Prefixed, Standalone};
+use slog::Logger;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
@@ -139,6 +140,7 @@ pub struct DistClientContainer {
 struct DistClientConfig {
     // Reusable items tied to an SccacheServer instance
     pool: CpuPool,
+    logger: Logger,
 
     // From the static dist configuration
     scheduler_url: Option<config::HTTPUrl>,
@@ -187,9 +189,10 @@ impl DistClientContainer {
 
 #[cfg(feature = "dist-client")]
 impl DistClientContainer {
-    fn new(config: &Config, pool: &CpuPool) -> Self {
+    fn new(config: &Config, pool: &CpuPool, logger: &Logger) -> Self {
         let config = DistClientConfig {
             pool: pool.clone(),
+            logger: logger.clone(),
 
             scheduler_url: config.dist.scheduler_url.clone(),
             auth: config.dist.auth.clone(),
@@ -391,16 +394,16 @@ impl DistClientContainer {
 ///
 /// Spins an event loop handling client connections until a client
 /// requests a shutdown.
-pub fn start_server(config: &Config, port: u16) -> Result<()> {
+pub fn start_server(config: &Config, port: u16, logger: Logger) -> Result<()> {
     info!("start_server: port: {}", port);
     let client = unsafe { Client::new() };
     let runtime = Runtime::new()?;
     let pool = CpuPool::new(std::cmp::max(20, 2 * num_cpus::get()));
-    let dist_client = DistClientContainer::new(config, &pool);
-    let storage = storage_from_config(config, &pool);
+    let dist_client = DistClientContainer::new(config, &pool, &logger);
+    let storage = storage_from_config(config, &pool); // , &logger);
     let res = SccacheServer::<ProcessCommandCreator>::new(
         port,
-        pool,
+        pool, logger,
         runtime,
         client,
         dist_client,
@@ -436,7 +439,7 @@ pub struct SccacheServer<C: CommandCreatorSync> {
 impl<C: CommandCreatorSync> SccacheServer<C> {
     pub fn new(
         port: u16,
-        pool: CpuPool,
+        pool: CpuPool, logger: Logger,
         runtime: Runtime,
         client: Client,
         dist_client: DistClientContainer,
@@ -449,7 +452,7 @@ impl<C: CommandCreatorSync> SccacheServer<C> {
         // connections.
         let (tx, rx) = mpsc::channel(1);
         let (wait, info) = WaitUntilZero::new();
-        let service = SccacheService::new(dist_client, storage, &client, pool, tx, info);
+        let service = SccacheService::new(dist_client, storage, &client, pool, logger, tx, info);
 
         Ok(SccacheServer {
             runtime,
@@ -650,6 +653,8 @@ struct SccacheService<C: CommandCreatorSync> {
     /// Thread pool to execute work in
     pool: CpuPool,
 
+    logger: Logger,
+
     /// An object for creating commands.
     ///
     /// This is mostly useful for unit testing, where we
@@ -690,17 +695,53 @@ where
     type Error = Error;
     type Future = SFuture<Self::Response>;
 
+
     fn call(&mut self, req: SccacheRequest) -> Self::Future {
-            // let logger = if let cmdline::Command::Compile { .. } = cmd {
-            //     slog_scope::logger().new(slog_o!("x-request-id" => 1))
-            // } else {
-            //     slog_scope::logger().new(slog_o!())
-            // };
+        // XXX: generate a GUID.
+        let logger = self.logger.new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp()));
 
-            // slog_error!(slog_scope::logger(), "foo"; "cmd" => format!("{:?}", cmd));
+        // let logger = slog_scope::logger().new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp()));
+        warn!("handle_client");
 
-        slog_scope::scope(&slog_scope::logger().new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp())),
-                          || { self._call(req) })
+        // Opportunistically let channel know that we've received a request. We
+        // ignore failures here as well as backpressure as it's not imperative
+        // that every message is received.
+        drop(self.tx.clone().start_send(ServerMessage::Request));
+
+        let res: SFuture<Response> = match req.into_inner() {
+            Request::Compile(compile) => {
+                slog_debug!(logger, "handle_client: compile");
+                self.stats.borrow_mut().compile_requests += 1;
+                return self.handle_compile(compile, &logger);
+            }
+            Request::GetStats => {
+                slog_debug!(logger, "handle_client: get_stats");
+                Box::new(self.get_info().map(|i| Response::Stats(Box::new(i))))
+            }
+            Request::DistStatus => {
+                slog_debug!(logger, "handle_client: dist_status");
+                Box::new(self.get_dist_status().map(Response::DistStatus))
+            }
+            Request::ZeroStats => {
+                slog_debug!(logger, "handle_client: zero_stats");
+                self.zero_stats();
+                Box::new(self.get_info().map(|i| Response::Stats(Box::new(i))))
+            }
+            Request::Shutdown => {
+                slog_debug!(logger, "handle_client: shutdown");
+                let future = self
+                    .tx
+                    .clone()
+                    .send(ServerMessage::Shutdown)
+                    .then(|_| Ok(()));
+                let info_future = self.get_info();
+                return Box::new(future.join(info_future).map(move |(_, info)| {
+                    Message::WithoutBody(Response::ShuttingDown(Box::new(info)))
+                }));
+            }
+        };
+
+        Box::new(res.map(Message::WithoutBody))
     }
 
     fn poll_ready(&mut self) -> Poll<(), Self::Error> {
@@ -716,7 +757,7 @@ where
         dist_client: DistClientContainer,
         storage: Arc<dyn Storage>,
         client: &Client,
-        pool: CpuPool,
+        pool: CpuPool, logger: Logger,
         tx: mpsc::Sender<ServerMessage>,
         info: ActiveInfo,
     ) -> SccacheService<C> {
@@ -726,57 +767,11 @@ where
             storage,
             compilers: Rc::new(RefCell::new(HashMap::new())),
             compiler_proxies: Rc::new(RefCell::new(HashMap::new())),
-            pool,
+            pool, logger,
             creator: C::new(client),
             tx,
             info,
         }
-    }
-
-    fn _call(&mut self, req: SccacheRequest) -> <SccacheService<C> as Service<SccacheRequest>>::Future {
-        warn!("handle_client");
-
-        let logger = slog_scope::logger();
-
-        // Opportunistically let channel know that we've received a request. We
-        // ignore failures here as well as backpressure as it's not imperative
-        // that every message is received.
-        drop(self.tx.clone().start_send(ServerMessage::Request));
-
-        let res: SFuture<Response> = match req.into_inner() {
-            Request::Compile(compile) => {
-                slog_debug!(logger, "handle_client: compile");
-                self.stats.borrow_mut().compile_requests += 1;
-                return self.handle_compile(compile);
-            }
-            Request::GetStats => {
-                debug!("handle_client: get_stats");
-                Box::new(self.get_info().map(|i| Response::Stats(Box::new(i))))
-            }
-            Request::DistStatus => {
-                debug!("handle_client: dist_status");
-                Box::new(self.get_dist_status().map(Response::DistStatus))
-            }
-            Request::ZeroStats => {
-                debug!("handle_client: zero_stats");
-                self.zero_stats();
-                Box::new(self.get_info().map(|i| Response::Stats(Box::new(i))))
-            }
-            Request::Shutdown => {
-                debug!("handle_client: shutdown");
-                let future = self
-                    .tx
-                    .clone()
-                    .send(ServerMessage::Shutdown)
-                    .then(|_| Ok(()));
-                let info_future = self.get_info();
-                return Box::new(future.join(info_future).map(move |(_, info)| {
-                    Message::WithoutBody(Response::ShuttingDown(Box::new(info)))
-                }));
-            }
-        };
-
-        Box::new(res.map(Message::WithoutBody))
     }
 
     fn bind<T>(mut self, socket: T) -> impl Future<Item = (), Error = Error>
@@ -856,7 +851,7 @@ where
     /// This will handle a compile request entirely, generating a response with
     /// the inital information and an optional body which will eventually
     /// contain the results of the compilation.
-    fn handle_compile(&self, compile: Compile) -> SFuture<SccacheResponse> {
+    fn handle_compile(&self, compile: Compile, logger: &Logger) -> SFuture<SccacheResponse> {
         let exe = compile.exe;
         let cmd = compile.args;
         let cwd: PathBuf = compile.cwd.into();
@@ -868,9 +863,6 @@ where
                 .map(move |info| me.check_compiler(info, cmd, cwd, env_vars)),
         )
     }
-
-    
-
 
     /// Look up compiler info from the cache for the compiler `path`.
     /// If not cached, determine the compiler type and cache the result.
@@ -980,7 +972,7 @@ where
                             &path1,
                             &cwd,
                             env.as_slice(),
-                            &me.pool,
+                            &me.pool, &me.logger,
                             dist_info.clone().map(|(p, _)| p),
                         );
 
@@ -1035,7 +1027,7 @@ where
         let mut stats = self.stats.borrow_mut();
         match compiler {
             Err(e) => {
-                debug!("check_compiler: Unsupported compiler: {}", e.to_string());
+                slog_debug!(self.logger, "check_compiler: Unsupported compiler: {}", e.to_string());
                 stats.requests_unsupported_compiler += 1;
                 return Message::WithoutBody(Response::Compile(
                     CompileResponse::UnsupportedCompiler(OsString::from(e.to_string())),
@@ -1098,7 +1090,7 @@ where
         } else {
             CacheControl::Default
         };
-        let out_pretty = hasher.output_pretty().into_owned();
+        let out_pretty = "XXX".to_string(); // hasher.output_pretty().into_owned();
         let color_mode = hasher.color_mode();
         let result = hasher.get_cached_or_compile(
             self.dist_client.get_client(),

@@ -1061,7 +1061,7 @@ diab
         .envs(env.iter().map(|s| (&s.0, &s.1)));
     let output = write.and_then(move |(tempdir, src)| {
         cmd.arg("-E").arg(src);
-        slog_trace!(logger, "compiler {:?}", cmd);
+        slog_trace!(&logger, "compiler {:?}", cmd);
         cmd.spawn()
             .and_then(|child| {
                 child
@@ -1083,35 +1083,35 @@ diab
             //TODO: do something smarter here.
             match line {
                 "clang" => {
-                    slog_debug!(logger, "Found clang");
+                    slog_debug!(logger2, "Found clang");
                     return Box::new(
-                        CCompiler::new(Clang, executable, &pool, &logger)
+                        CCompiler::new(Clang, executable, &pool, &logger2)
                             .map(|c| Box::new(c) as Box<dyn Compiler<T>>),
                     );
                 }
                 "diab" => {
-                    slog_debug!(logger, "Found diab");
+                    slog_debug!(logger2, "Found diab");
                     return Box::new(
-                        CCompiler::new(Diab, executable, &pool, &logger)
+                        CCompiler::new(Diab, executable, &pool, &logger2)
                             .map(|c| Box::new(c) as Box<dyn Compiler<T>>),
                     );
                 }
                 "gcc" => {
-                    slog_debug!(logger, "Found GCC");
+                    slog_debug!(logger2, "Found GCC");
                     return Box::new(
-                        CCompiler::new(GCC, executable, &pool, &logger)
+                        CCompiler::new(GCC, executable, &pool, &logger2)
                             .map(|c| Box::new(c) as Box<dyn Compiler<T>>),
                     );
                 }
                 "msvc" | "msvc-clang" => {
                     let is_clang = line == "msvc-clang";
-                    slog_debug!(logger, "Found MSVC (is clang: {})", is_clang);
+                    slog_debug!(logger2, "Found MSVC (is clang: {})", is_clang);
                     let prefix = msvc::detect_showincludes_prefix(
                         &creator,
                         executable.as_ref(),
                         is_clang,
                         env,
-                        &pool, &logger,
+                        &pool, &logger2,
                     );
                     return Box::new(prefix.and_then(move |prefix| {
                         slog_trace!(logger2, "showIncludes prefix: '{}'", prefix);
@@ -1131,9 +1131,9 @@ diab
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr);
-        slog_debug!(logger, "nothing useful in detection output {:?}", stdout);
-        slog_debug!(logger, "compiler status: {}", output.status);
-        slog_debug!(logger, "compiler stderr:\n{}", stderr);
+        slog_debug!(logger2, "nothing useful in detection output {:?}", stdout);
+        slog_debug!(logger2, "compiler status: {}", output.status);
+        slog_debug!(logger2, "compiler stderr:\n{}", stderr);
 
         f_err(stderr.into_owned())
     }))

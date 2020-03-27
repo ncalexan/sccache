@@ -25,6 +25,7 @@ use atty::Stream;
 use byteorder::{BigEndian, ByteOrder};
 use futures::Future;
 use log::Level::Trace;
+use slog::Logger;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
@@ -536,7 +537,7 @@ where
 }
 
 /// Run `cmd` and return the process exit status.
-pub fn run_command(cmd: Command) -> Result<i32> {
+pub fn run_command(cmd: Command, logger: Logger) -> Result<i32> {
     // Config isn't required for all commands, but if it's broken then we should flag
     // it early and loudly.
     let config = &Config::load()?;
@@ -556,7 +557,7 @@ pub fn run_command(cmd: Command) -> Result<i32> {
             // Can't report failure here, we're already daemonized.
             daemonize()?;
             redirect_error_log()?;
-            server::start_server(config, get_port())?;
+            server::start_server(config, get_port(), logger)?;
         }
         Command::StartServer => {
             trace!("Command::StartServer");
@@ -663,7 +664,7 @@ pub fn run_command(cmd: Command) -> Result<i32> {
             let out_file = File::create(out)?;
             let cwd = env::current_dir().expect("A current working dir should exist");
 
-            let compiler = compiler::get_compiler_info(creator, &executable, &cwd, &env, &pool, None);
+            let compiler = compiler::get_compiler_info(creator, &executable, &cwd, &env, &pool, &logger, None);
             let packager = compiler.map(|c| c.0.get_toolchain_packager());
             let res = packager.and_then(|p| p.write_pkg(out_file));
             runtime.block_on(res)?
