@@ -24,6 +24,7 @@ use crate::errors::*;
 use crate::mock_command::{CommandCreatorSync, RunCommand};
 use crate::util::{run_input_output, OsStrExt};
 use log::Level::Trace;
+use slog::Logger;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::File;
@@ -42,6 +43,7 @@ impl CCompilerImpl for Diab {
         &self,
         arguments: &[OsString],
         cwd: &Path,
+        logger: &Logger,
     ) -> CompilerArguments<ParsedArguments> {
         parse_arguments(arguments, cwd, &ARGS[..])
     }

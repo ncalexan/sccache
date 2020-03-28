@@ -472,6 +472,7 @@ where
         &self,
         arguments: &[OsString],
         cwd: &Path,
+        logger: &Logger,
     ) -> CompilerArguments<Box<dyn CompilerHasher<T> + 'static>> {
         match parse_arguments(arguments, cwd) {
             CompilerArguments::Ok(args) => CompilerArguments::Ok(Box::new(RustHasher {
@@ -1491,6 +1492,10 @@ where
 
     fn color_mode(&self) -> ColorMode {
         self.parsed_args.color_mode
+    }
+
+    fn output_pretty(&self) -> Cow<'_, str> {
+        Cow::Borrowed(&self.parsed_args.crate_name)
     }
 
     // fn logger(&self) -> Logger {

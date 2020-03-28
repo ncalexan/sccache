@@ -687,6 +687,150 @@ pub enum ServerMessage {
     Shutdown,
 }
 
+/// A `Future` wrapped in a slog scope.
+pub struct SlogScope<L, F> {
+    logger: L,
+    inner: F,
+}
+
+impl<L, F> SlogScope<L, F>
+where
+    F: Future,
+    L: std::borrow::Borrow<Logger>,
+{
+    /// Wrap a `Future` in a slog scope.
+    pub fn new(logger: L, inner: F) -> Self {
+        SlogScope { logger, inner }
+    }
+}
+
+impl<L, F> Future for SlogScope<L, F>
+where
+    F: Future,
+    L: std::borrow::Borrow<Logger>,
+{
+    type Item = F::Item;
+    type Error = F::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let logger = self.logger.borrow().clone();
+        slog_scope::scope(&logger, || self.inner.poll())
+    }
+}
+
+// /// A `Future` wrapped in a slog scope.
+// pub struct SlogScope<F> {
+//     logger: Logger,
+//     inner: F,
+// }
+
+// impl<F> SlogScope<F>
+// where
+//     F: Future,
+// {
+//     /// Wrap a `Future` in a slog scope.
+//     pub fn new(logger: Logger, inner: F) -> Self {
+//         SlogScope { logger, inner }
+//     }
+// }
+
+// impl<F> Future for SlogScope<F>
+// where
+//     F: Future,
+// {
+//     type Item = F::Item;
+//     type Error = F::Error;
+
+//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+//         let logger = &self.logger.clone();
+//         slog_scope::scope(logger, || self.inner.poll())
+//     }
+// }
+
+// // impl SFuture
+
+// // /// Convenience trait for wrapping a `Future` in a slog scope via method chaining.
+// // ///
+// // /// Automatically implemented for all `Future`s.
+
+// pub trait FutureExt: Future + Sized // where <Self as futures::Future>::Error = crate::errors::Error
+// {
+//     /// Wrap `self` in a slog scope
+//     fn with_logger<L>(self, logger: L) -> SFuture<Self::Item>
+//     where
+//         L: std::borrow::Borrow<Logger>;
+//     // {
+//     //     Box::new(SlogScope::new(logger, self))
+//     // }
+// }
+
+// // impl<F> FutureExt for F where F: Future {}
+
+// impl<T> FutureExt for SFuture<T> {
+//     /// Wrap `self` in a slog scope
+//     fn with_logger<L>(self, logger: L) -> SFuture<Self::Item>
+//     where
+//         L: std::borrow::Borrow<Logger>
+//     {
+//         Box::new(SlogScope::new(logger, self))
+//     }
+// }
+
+
+// pub trait FutureWithLogger<T> {
+//     fn with_logger<L>(self, logger: Logger) -> SFuture<T>;
+//     // where
+//     //     L: std::borrow::Borrow<Logger> + 'static;
+// }
+
+// impl<T: 'static> FutureWithLogger<T> for SFuture<T> // F
+// // where
+// //     T: 'static,
+// // where
+// //     F: Future + 'static,
+// //     F::Error: std::error::Error + Send + 'static,
+// {
+//     fn with_logger<L>(self, logger: Logger) -> SFuture<T>
+//     // where
+//     //     L: Logger,
+//     {
+//         Box::new(SlogScope::new(logger, self))
+//     }
+// }
+
+pub trait FutureWithLogger<T> {
+    // fn chain_err<F, E>(self, callback: F) -> SFuture<T>
+    // where
+    //     F: FnOnce() -> E + 'static,
+    //     E: Into<ErrorKind>;
+
+    fn with_logger<L>(self, logger: L) -> SFuture<T>
+    where
+        L: std::borrow::Borrow<Logger>;
+}
+
+impl<F> FutureWithLogger<F::Item> for F
+where
+    F: Future<Error = crate::errors::Error> + 'static,
+    // F::Error: std::error::Error + Send + 'static,
+{
+    // fn chain_err<C, E>(self, callback: C) -> SFuture<F::Item>
+    // where
+    //     C: FnOnce() -> E + 'static,
+    //     E: Into<ErrorKind>,
+    // {
+    //     Box::new(self.then(|r| r.chain_err(callback)))
+    // }
+
+    fn with_logger<L>(self, logger: L) -> SFuture<F::Item>
+    where
+        L: std::borrow::Borrow<Logger>
+    {
+        Box::new(SlogScope::new(logger.borrow().clone(), self))
+    }
+}
+
+
 impl<C> Service<SccacheRequest> for SccacheService<C>
 where
     C: CommandCreatorSync + 'static,
@@ -695,13 +839,12 @@ where
     type Error = Error;
     type Future = SFuture<Self::Response>;
 
-
     fn call(&mut self, req: SccacheRequest) -> Self::Future {
         // XXX: generate a GUID.
         let logger = self.logger.new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp()));
 
         // let logger = slog_scope::logger().new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp()));
-        warn!("handle_client");
+        slog_warn!(logger, "handle_client");
 
         // Opportunistically let channel know that we've received a request. We
         // ignore failures here as well as backpressure as it's not imperative
@@ -713,6 +856,7 @@ where
                 slog_debug!(logger, "handle_client: compile");
                 self.stats.borrow_mut().compile_requests += 1;
                 return self.handle_compile(compile, &logger);
+                    // .with_logger(;
             }
             Request::GetStats => {
                 slog_debug!(logger, "handle_client: get_stats");
@@ -851,28 +995,39 @@ where
     /// This will handle a compile request entirely, generating a response with
     /// the inital information and an optional body which will eventually
     /// contain the results of the compilation.
-    fn handle_compile(&self, compile: Compile, logger: &Logger) -> SFuture<SccacheResponse> {
+    fn handle_compile<L>(&self, compile: Compile, logger: L) -> SFuture<SccacheResponse>
+    where L: std::borrow::Borrow<Logger>,
+    {
         let exe = compile.exe;
         let cmd = compile.args;
         let cwd: PathBuf = compile.cwd.into();
         let env_vars = compile.env_vars;
         let me = self.clone();
 
-        Box::new(
-            self.compiler_info(exe.into(), cwd.clone(), &env_vars)
-                .map(move |info| me.check_compiler(info, cmd, cwd, env_vars)),
-        )
+        let logger = logger.borrow().clone();
+
+        // slog_scope::scope(&logger, || {
+            Box::new(
+                self.compiler_info(exe.into(), cwd.clone(), &env_vars, logger.clone())
+                    .map(move |info| me.check_compiler(info, cmd, cwd, env_vars, logger)),
+            )// .with_logger(logger)
+        // })
     }
 
     /// Look up compiler info from the cache for the compiler `path`.
     /// If not cached, determine the compiler type and cache the result.
-    fn compiler_info(
+    fn compiler_info<L>(
         &self,
         path: PathBuf,
         cwd: PathBuf,
         env: &[(OsString, OsString)],
-    ) -> SFuture<Result<Box<dyn Compiler<C>>>> {
-        trace!("compiler_info");
+        logger: L,
+    ) -> SFuture<Result<Box<dyn Compiler<C>>>>
+    where
+        L: std::borrow::Borrow<Logger>,
+    {
+        let logger = logger.borrow().clone();
+        slog_trace!(logger, "compiler_info");
 
         let me = self.clone();
         let me1 = self.clone();
@@ -956,11 +1111,11 @@ where
             lookup_compiler.and_then(move |(resolved_compiler_path, mtime, opt, dist_info) : (PathBuf, FileTime, Option<Box<dyn Compiler<C>>>, Option<(PathBuf,FileTime)> )| {
                 match opt {
                     Some(info) => {
-                        trace!("compiler_info cache hit");
+                        slog_trace!(logger, "compiler_info cache hit");
                         f_ok(Ok(info))
                     }
                     None => {
-                        trace!("compiler_info cache miss");
+                        slog_trace!(logger, "compiler_info cache miss");
                         // Check the compiler type and return the result when
                         // finished. This generally involves invoking the compiler,
                         // so do it asynchronously.
@@ -984,7 +1139,7 @@ where
                                     // and the true/resolved compiler will create table hits in the hash map
                                     // based on the resolved path
                                     if let Some(proxy) = proxy {
-                                        trace!("Inserting new path proxy {:?} @ {:?} -> {:?}", &path, &cwd, resolved_compiler_path);
+                                        slog_trace!(logger, "Inserting new path proxy {:?} @ {:?} -> {:?}", &path, &cwd, resolved_compiler_path);
                                         let proxy : Box<dyn CompilerProxy<C>> =  proxy.box_clone();
                                         me.compiler_proxies.borrow_mut().insert(path, (proxy, mtime.clone()));
                                     }
@@ -993,11 +1148,11 @@ where
 
                                     // cache
                                     let map_info = CompilerCacheEntry::new(c.clone(), mtime, dist_info);
-                                    trace!("Inserting POSSIBLY PROXIED cache map info for {:?}", &resolved_compiler_path);
+                                    slog_trace!(logger, "Inserting POSSIBLY PROXIED cache map info for {:?}", &resolved_compiler_path);
                                     me.compilers.borrow_mut().insert(resolved_compiler_path, Some(map_info));
                                 },
                                 Err(_) => {
-                                    trace!("Inserting PLAIN cache map info for {:?}", &path);
+                                    slog_trace!(logger, "Inserting PLAIN cache map info for {:?}", &path);
                                     me.compilers.borrow_mut().insert(path, None);
                                 }
                             }
@@ -1017,49 +1172,54 @@ where
 
     /// Check that we can handle and cache `cmd` when run with `compiler`.
     /// If so, run `start_compile_task` to execute it.
-    fn check_compiler(
+    fn check_compiler<L>(
         &self,
         compiler: Result<Box<dyn Compiler<C>>>,
         cmd: Vec<OsString>,
         cwd: PathBuf,
         env_vars: Vec<(OsString, OsString)>,
-    ) -> SccacheResponse {
+        logger: L,
+    ) -> SccacheResponse
+    where L: std::borrow::Borrow<Logger>,
+    {
+        let logger = logger.borrow().clone();
+
         let mut stats = self.stats.borrow_mut();
         match compiler {
             Err(e) => {
-                slog_debug!(self.logger, "check_compiler: Unsupported compiler: {}", e.to_string());
+                slog_debug!(logger, "check_compiler: Unsupported compiler: {}", e.to_string());
                 stats.requests_unsupported_compiler += 1;
                 return Message::WithoutBody(Response::Compile(
                     CompileResponse::UnsupportedCompiler(OsString::from(e.to_string())),
                 ));
             }
             Ok(c) => {
-                debug!("check_compiler: Supported compiler");
+                slog_debug!(logger, "check_compiler: Supported compiler");
                 // Now check that we can handle this compiler with
                 // the provided commandline.
-                match c.parse_arguments(&cmd, &cwd) {
+                match c.parse_arguments(&cmd, &cwd, &logger) {
                     CompilerArguments::Ok(hasher) => {
-                        debug!("parse_arguments: Ok: {:?}", cmd);
+                        slog_debug!(logger, "parse_arguments: Ok: {:?}", cmd);
                         stats.requests_executed += 1;
                         let (tx, rx) = Body::pair();
-                        self.start_compile_task(c, hasher, cmd, cwd, env_vars, tx);
+                        self.start_compile_task(c, hasher, cmd, cwd, env_vars, tx, logger);
                         let res = CompileResponse::CompileStarted;
                         return Message::WithBody(Response::Compile(res), rx);
                     }
                     CompilerArguments::CannotCache(why, extra_info) => {
                         if let Some(extra_info) = extra_info {
-                            debug!(
+                            slog_debug!(logger, 
                                 "parse_arguments: CannotCache({}, {}): {:?}",
                                 why, extra_info, cmd
                             )
                         } else {
-                            debug!("parse_arguments: CannotCache({}): {:?}", why, cmd)
+                            slog_debug!(logger, "parse_arguments: CannotCache({}): {:?}", why, cmd)
                         }
                         stats.requests_not_cacheable += 1;
                         *stats.not_cached.entry(why.to_string()).or_insert(0) += 1;
                     }
                     CompilerArguments::NotCompilation => {
-                        debug!("parse_arguments: NotCompilation: {:?}", cmd);
+                        slog_debug!(logger, "parse_arguments: NotCompilation: {:?}", cmd);
                         stats.requests_not_compile += 1;
                     }
                 }
@@ -1073,7 +1233,7 @@ where
     /// Given compiler arguments `arguments`, look up
     /// a compile result in the cache or execute the compilation and store
     /// the result in the cache.
-    fn start_compile_task(
+    fn start_compile_task<L>(
         &self,
         compiler: Box<dyn Compiler<C>>,
         hasher: Box<dyn CompilerHasher<C>>,
@@ -1081,7 +1241,12 @@ where
         cwd: PathBuf,
         env_vars: Vec<(OsString, OsString)>,
         tx: mpsc::Sender<Result<Response>>,
-    ) {
+        logger: L,
+    )
+    where L: std::borrow::Borrow<Logger>,
+    {
+        let logger = logger.borrow().new(slog_o!("out_pretty" => hasher.output_pretty().into_owned()));
+
         let force_recache = env_vars
             .iter()
             .any(|&(ref k, ref _v)| k.as_os_str() == OsStr::new("SCCACHE_RECACHE"));
@@ -1090,7 +1255,9 @@ where
         } else {
             CacheControl::Default
         };
-        let out_pretty = "XXX".to_string(); // hasher.output_pretty().into_owned();
+        // let out_pretty = "XXX".to_string(); // 
+        // let out_pretty = hasher.output_pretty().into_owned(); // XXX
+
         let color_mode = hasher.color_mode();
         let result = hasher.get_cached_or_compile(
             self.dist_client.get_client(),
@@ -1100,7 +1267,7 @@ where
             cwd,
             env_vars,
             cache_control,
-            self.pool.clone(), self.logger.clone(),
+            self.pool.clone(), logger.clone(),
         );
         let me = self.clone();
         let kind = compiler.kind();
@@ -1159,7 +1326,7 @@ where
                         stdout,
                         stderr,
                     } = out;
-                    trace!("CompileFinished retcode: {}", status);
+                    slog_trace!(logger, "CompileFinished retcode: {}", status);
                     match status.code() {
                         Some(code) => res.retcode = Some(code),
                         None => res.signal = Some(get_signal(status)),
@@ -1168,7 +1335,7 @@ where
                     res.stderr = stderr;
                 }
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
-                    debug!("Compilation failed: {:?}", output);
+                    slog_debug!(logger, "Compilation failed: {:?}", output);
                     stats.compile_fails += 1;
                     match output.status.code() {
                         Some(code) => res.retcode = Some(code),
@@ -1179,20 +1346,20 @@ where
                 }
                 Err(Error(ErrorKind::HttpClientError(msg), _)) => {
                     me.dist_client.reset_state();
-                    let errmsg = format!("[{:?}] http error status: {}", out_pretty, msg);
-                    error!("{}", errmsg);
+                    let errmsg = format!("http error status: {}", msg);
+                    slog_error!(logger, "{}", errmsg);
                     res.retcode = Some(1);
                     res.stderr = errmsg.as_bytes().to_vec();
                 }
                 Err(err) => {
                     use std::fmt::Write;
 
-                    error!("[{:?}] fatal error: {}", out_pretty, err);
+                    slog_error!(logger, "fatal error: {}", err);
 
                     let mut error = "sccache: encountered fatal error\n".to_string();
                     let _ = writeln!(error, "sccache: error : {}", err);
                     for e in err.iter() {
-                        error!("[{:?}] \t{}", out_pretty, e);
+                        slog_error!(logger, "\t{}", e); // XXX
                         let _ = writeln!(error, "sccache:  cause: {}", e);
                     }
                     stats.cache_errors.increment(&kind);
@@ -1207,14 +1374,13 @@ where
             let cache_write = cache_write.then(move |result| {
                 match result {
                     Err(e) => {
-                        debug!("Error executing cache write: {}", e);
+                        slog_debug!(logger, "Error executing cache write: {}", e);
                         me.stats.borrow_mut().cache_write_errors += 1;
                     }
                     //TODO: save cache stats!
                     Ok(Some(info)) => {
-                        debug!(
-                            "[{}]: Cache write finished in {}",
-                            info.object_file_pretty,
+                        slog_debug!(logger, 
+                            "Cache write finished in {}",
                             util::fmt_duration_as_secs(&info.duration)
                         );
                         me.stats.borrow_mut().cache_writes += 1;

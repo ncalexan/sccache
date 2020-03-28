@@ -165,6 +165,7 @@ pub trait CCompilerImpl: Clone + fmt::Debug + Send + 'static {
         &self,
         arguments: &[OsString],
         cwd: &Path,
+        logger: &Logger,
     ) -> CompilerArguments<ParsedArguments>;
     /// Run the C preprocessor with the specified set of arguments.
     #[allow(clippy::too_many_arguments)]
@@ -225,14 +226,15 @@ impl<T: CommandCreatorSync, I: CCompilerImpl> Compiler<T> for CCompiler<I> {
         &self,
         arguments: &[OsString],
         cwd: &Path,
+        logger: &Logger,
     ) -> CompilerArguments<Box<dyn CompilerHasher<T> + 'static>> {
-        match self.compiler.parse_arguments(arguments, cwd) {
+        match self.compiler.parse_arguments(arguments, cwd, logger) {
             CompilerArguments::Ok(args) => CompilerArguments::Ok(Box::new(CCompilerHasher {
                 parsed_args: args,
                 executable: self.executable.clone(),
                 executable_digest: self.executable_digest.clone(),
                 compiler: self.compiler.clone(),
-                logger: self.logger.clone(),
+                logger: logger.clone(),
             })),
             CompilerArguments::CannotCache(why, extra_info) => {
                 CompilerArguments::CannotCache(why, extra_info)
@@ -369,6 +371,10 @@ where
 
     fn color_mode(&self) -> ColorMode {
         self.parsed_args.color_mode
+    }
+
+    fn output_pretty(&self) -> Cow<'_, str> {
+        self.parsed_args.output_pretty()
     }
 
     // fn logger(&self) -> Logger {

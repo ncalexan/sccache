@@ -23,6 +23,7 @@ use crate::mock_command::{CommandCreator, CommandCreatorSync, RunCommand};
 use crate::util::{run_input_output, OsStrExt};
 use futures::future::{self, Future};
 use futures_cpupool::CpuPool;
+use slog::Logger;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, Write};
@@ -43,6 +44,7 @@ impl CCompilerImpl for Clang {
         &self,
         arguments: &[OsString],
         cwd: &Path,
+        logger: &Logger,
     ) -> CompilerArguments<ParsedArguments> {
         gcc::parse_arguments(arguments, cwd, (&gcc::ARGS[..], &ARGS[..]))
     }

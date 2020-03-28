@@ -85,6 +85,10 @@ pub trait FutureChainErr<T> {
     where
         F: FnOnce() -> E + 'static,
         E: Into<ErrorKind>;
+
+    // fn with_logger<L>(self, logger: L) -> SFuture<T>
+    // where
+    //     L: std::borrow::Borrow<Logger>;
 }
 
 impl<F> FutureChainErr<F::Item> for F
@@ -99,6 +103,13 @@ where
     {
         Box::new(self.then(|r| r.chain_err(callback)))
     }
+
+    // fn with_logger<L>(self, logger: L) -> SFuture<F::Item>
+    // where
+    //     L: std::borrow::Borrow<Logger>
+    // {
+    //     Box::new(SlogScope::new(logger, self))
+    // }
 }
 
 /// Like `try`, but returns an SFuture instead of a Result.

@@ -52,8 +52,9 @@ impl CCompilerImpl for MSVC {
         &self,
         arguments: &[OsString],
         cwd: &Path,
+        logger: &Logger,
     ) -> CompilerArguments<ParsedArguments> {
-        parse_arguments(arguments, cwd, self.is_clang)
+        parse_arguments(arguments, cwd, logger, self.is_clang)
     }
 
     fn preprocess<T>(
@@ -271,6 +272,7 @@ msvc_args!(static ARGS: [ArgInfo<ArgData>; _] = [
 pub fn parse_arguments(
     arguments: &[OsString],
     cwd: &Path,
+    logger: &Logger,
     is_clang: bool,
 ) -> CompilerArguments<ParsedArguments> {
     let mut output_arg = None;
