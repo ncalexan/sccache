@@ -140,7 +140,6 @@ pub struct DistClientContainer {
 struct DistClientConfig {
     // Reusable items tied to an SccacheServer instance
     pool: CpuPool,
-    logger: Logger,
 
     // From the static dist configuration
     scheduler_url: Option<config::HTTPUrl>,
@@ -189,10 +188,9 @@ impl DistClientContainer {
 
 #[cfg(feature = "dist-client")]
 impl DistClientContainer {
-    fn new(config: &Config, pool: &CpuPool, logger: &Logger) -> Self {
+    fn new(config: &Config, pool: &CpuPool, logger: &Logger) -> Self { // XXX drop logger.
         let config = DistClientConfig {
             pool: pool.clone(),
-            logger: logger.clone(),
 
             scheduler_url: config.dist.scheduler_url.clone(),
             auth: config.dist.auth.clone(),
@@ -655,7 +653,7 @@ struct SccacheService<C: CommandCreatorSync> {
 
     logger: Logger,
 
-    last_request_id: i64,
+    last_request_id: Rc<Mutex<i64>>,
 
     /// An object for creating commands.
     ///
@@ -689,150 +687,6 @@ pub enum ServerMessage {
     Shutdown,
 }
 
-/// A `Future` wrapped in a slog scope.
-pub struct SlogScope<L, F> {
-    logger: L,
-    inner: F,
-}
-
-impl<L, F> SlogScope<L, F>
-where
-    F: Future,
-    L: std::borrow::Borrow<Logger>,
-{
-    /// Wrap a `Future` in a slog scope.
-    pub fn new(logger: L, inner: F) -> Self {
-        SlogScope { logger, inner }
-    }
-}
-
-impl<L, F> Future for SlogScope<L, F>
-where
-    F: Future,
-    L: std::borrow::Borrow<Logger>,
-{
-    type Item = F::Item;
-    type Error = F::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let logger = self.logger.borrow().clone();
-        slog_scope::scope(&logger, || self.inner.poll())
-    }
-}
-
-// /// A `Future` wrapped in a slog scope.
-// pub struct SlogScope<F> {
-//     logger: Logger,
-//     inner: F,
-// }
-
-// impl<F> SlogScope<F>
-// where
-//     F: Future,
-// {
-//     /// Wrap a `Future` in a slog scope.
-//     pub fn new(logger: Logger, inner: F) -> Self {
-//         SlogScope { logger, inner }
-//     }
-// }
-
-// impl<F> Future for SlogScope<F>
-// where
-//     F: Future,
-// {
-//     type Item = F::Item;
-//     type Error = F::Error;
-
-//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-//         let logger = &self.logger.clone();
-//         slog_scope::scope(logger, || self.inner.poll())
-//     }
-// }
-
-// // impl SFuture
-
-// // /// Convenience trait for wrapping a `Future` in a slog scope via method chaining.
-// // ///
-// // /// Automatically implemented for all `Future`s.
-
-// pub trait FutureExt: Future + Sized // where <Self as futures::Future>::Error = crate::errors::Error
-// {
-//     /// Wrap `self` in a slog scope
-//     fn with_logger<L>(self, logger: L) -> SFuture<Self::Item>
-//     where
-//         L: std::borrow::Borrow<Logger>;
-//     // {
-//     //     Box::new(SlogScope::new(logger, self))
-//     // }
-// }
-
-// // impl<F> FutureExt for F where F: Future {}
-
-// impl<T> FutureExt for SFuture<T> {
-//     /// Wrap `self` in a slog scope
-//     fn with_logger<L>(self, logger: L) -> SFuture<Self::Item>
-//     where
-//         L: std::borrow::Borrow<Logger>
-//     {
-//         Box::new(SlogScope::new(logger, self))
-//     }
-// }
-
-
-// pub trait FutureWithLogger<T> {
-//     fn with_logger<L>(self, logger: Logger) -> SFuture<T>;
-//     // where
-//     //     L: std::borrow::Borrow<Logger> + 'static;
-// }
-
-// impl<T: 'static> FutureWithLogger<T> for SFuture<T> // F
-// // where
-// //     T: 'static,
-// // where
-// //     F: Future + 'static,
-// //     F::Error: std::error::Error + Send + 'static,
-// {
-//     fn with_logger<L>(self, logger: Logger) -> SFuture<T>
-//     // where
-//     //     L: Logger,
-//     {
-//         Box::new(SlogScope::new(logger, self))
-//     }
-// }
-
-pub trait FutureWithLogger<T> {
-    // fn chain_err<F, E>(self, callback: F) -> SFuture<T>
-    // where
-    //     F: FnOnce() -> E + 'static,
-    //     E: Into<ErrorKind>;
-
-    fn with_logger<L>(self, logger: L) -> SFuture<T>
-    where
-        L: std::borrow::Borrow<Logger>;
-}
-
-impl<F> FutureWithLogger<F::Item> for F
-where
-    F: Future<Error = crate::errors::Error> + 'static,
-    // F::Error: std::error::Error + Send + 'static,
-{
-    // fn chain_err<C, E>(self, callback: C) -> SFuture<F::Item>
-    // where
-    //     C: FnOnce() -> E + 'static,
-    //     E: Into<ErrorKind>,
-    // {
-    //     Box::new(self.then(|r| r.chain_err(callback)))
-    // }
-
-    fn with_logger<L>(self, logger: L) -> SFuture<F::Item>
-    where
-        L: std::borrow::Borrow<Logger>
-    {
-        Box::new(SlogScope::new(logger.borrow().clone(), self))
-    }
-}
-
-
 impl<C> Service<SccacheRequest> for SccacheService<C>
 where
     C: CommandCreatorSync + 'static,
@@ -843,8 +697,16 @@ where
 
     fn call(&mut self, req: SccacheRequest) -> Self::Future {
         // XXX: generate a GUID.
-        self.last_request_id = (self.last_request_id + 1).max(chrono::offset::Utc::now().timestamp());
-        let logger = self.logger.new(slog_o!("x-request-id" => self.last_request_id));
+        // let mut last_request_id: &mut i64 = self.last_request_id.borrow_mut();
+        // borrow_mut() = (*self.last_request_id.borrow() + 1).max(chrono::offset::Utc::now().timestamp());
+        // // *last_request_id = last_request_id;
+        // // let logger = self.logger.new(slog_o!("x-request-id" => self.last_request_id));
+        let logger = {
+            let mut last_request_id = self.last_request_id.lock().unwrap();
+            // std::thread::sleep(Duration::from_millis(10));
+            *last_request_id = (*last_request_id + 1).max(chrono::offset::Utc::now().timestamp_millis());
+            self.logger.new(slog_o!("xrid" => *last_request_id))
+        };
 
         slog_warn!(logger, "handle_client");
 
@@ -913,7 +775,7 @@ where
             compilers: Rc::new(RefCell::new(HashMap::new())),
             compiler_proxies: Rc::new(RefCell::new(HashMap::new())),
             pool, logger,
-            last_request_id: 0,
+            last_request_id: Rc::new(Mutex::new(0)),
             creator: C::new(client),
             tx,
             info,
@@ -1129,7 +991,7 @@ where
                             &path1,
                             &cwd,
                             env.as_slice(),
-                            &me.pool, logger,
+                            &me.pool, &logger,
                             dist_info.clone().map(|(p, _)| p),
                         );
 
