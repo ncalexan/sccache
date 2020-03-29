@@ -393,15 +393,15 @@ impl DistClientContainer {
 /// Spins an event loop handling client connections until a client
 /// requests a shutdown.
 pub fn start_server(config: &Config, port: u16, logger: Logger) -> Result<()> {
-    info!("start_server: port: {}", port);
+    slog_info!(logger, "start_server: port: {port}", port = port);
     let client = unsafe { Client::new() };
     let runtime = Runtime::new()?;
-    let pool = CpuPool::new(std::cmp::max(20, 2 * num_cpus::get()));
+    let pool = CpuPool::new(std::cmp::max(20, 2 * num_cpus::get())); // XXX why?
     let dist_client = DistClientContainer::new(config, &pool, &logger);
     let storage = storage_from_config(config, &pool); // , &logger);
     let res = SccacheServer::<ProcessCommandCreator>::new(
         port,
-        pool, logger,
+        pool, logger.clone(),
         runtime,
         client,
         dist_client,
@@ -411,14 +411,14 @@ pub fn start_server(config: &Config, port: u16, logger: Logger) -> Result<()> {
     match res {
         Ok(srv) => {
             let port = srv.port();
-            info!("server started, listening on port {}", port);
+            slog_info!(logger, "server started, listening on port {port}", port = port);
             notify_server_startup(&notify, ServerStartup::Ok { port })?;
             srv.run(future::empty::<(), ()>())?;
             Ok(())
         }
         Err(e) => {
-            error!("failed to start server: {}", e);
             let reason = e.to_string();
+            slog_error!(logger, "failed to start server: {error}", error = reason.clone());
             notify_server_startup(&notify, ServerStartup::Err { reason })?;
             Err(e)
         }
