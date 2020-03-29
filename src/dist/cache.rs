@@ -10,6 +10,7 @@ use crate::errors::*;
 #[cfg(feature = "dist-client")]
 pub use self::client::ClientToolchains;
 use crate::util::Digest;
+use std::fmt::Display;
 use std::io::Read;
 
 #[cfg(feature = "dist-client")]
@@ -471,7 +472,7 @@ impl TcCache {
         self.inner
             .insert_with(make_lru_key_path(&tc.archive_id), with)
             .map_err(|e| -> Error { e.into() })?;
-        let verified_archive_id = file_key(self.get(tc)?)?;
+        let verified_archive_id = file_key(self.get(tc)?, &tc.archive_id)?;
         // TODO: remove created toolchain?
         if verified_archive_id == tc.archive_id {
             Ok(())
@@ -512,11 +513,11 @@ impl TcCache {
 
 #[cfg(feature = "dist-client")]
 fn path_key(path: &Path) -> Result<String> {
-    file_key(fs::File::open(path)?)
+    file_key(fs::File::open(path)?, &path.display())
 }
 
-fn file_key<R: Read>(rdr: R) -> Result<String> {
-    Digest::reader_sync(rdr)
+fn file_key<R: Read>(rdr: R, annotation: &dyn Display) -> Result<String> {
+    Digest::reader_sync(rdr, annotation)
 }
 /// Make a path to the cache entry with key `key`.
 fn make_lru_key_path(key: &str) -> PathBuf {
