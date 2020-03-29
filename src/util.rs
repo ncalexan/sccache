@@ -124,18 +124,21 @@ pub fn hash_all(files: &[PathBuf], pool: &CpuPool, logger: &Logger) -> SFuture<V
     let start = time::Instant::now();
     let count = files.len();
     let pool = pool.clone();
+    let logger2 = logger.clone();
+    let logger3 = logger.clone();
     Box::new(
         future::join_all(
             files
                 .iter()
-                .map(move |f| Digest::file(f, &pool, &logger))
+                .map(move |f| Digest::file(f, &pool, &logger2))
                 .collect::<Vec<_>>(),
         )
         .map(move |hashes| {
-            trace!(
-                "Hashed {} files in {}",
-                count,
-                fmt_duration_as_secs(&start.elapsed())
+            slog_trace!(
+                logger3,
+                "Hashed {count} files in {duration}",
+                count = count,
+                duration = fmt_duration_as_secs(&start.elapsed())
             );
             hashes
         }),

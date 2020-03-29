@@ -25,6 +25,7 @@ use crate::cache::redis::RedisCache;
 use crate::cache::s3::S3Cache;
 use crate::config::{self, CacheType, Config};
 use futures_cpupool::CpuPool;
+use slog::Logger;
 use std::fmt;
 #[cfg(feature = "gcs")]
 use std::fs::File;
@@ -149,13 +150,13 @@ pub trait Storage {
     /// it should return a `Cache::Miss`.
     /// If the entry is successfully found in the cache, it should
     /// return a `Cache::Hit`.
-    fn get(&self, key: &str) -> SFuture<Cache>;
+    fn get(&self, key: &str, logger: &Logger) -> SFuture<Cache>;
 
     /// Put `entry` in the cache under `key`.
     ///
     /// Returns a `Future` that will provide the result or error when the put is
     /// finished.
-    fn put(&self, key: &str, entry: CacheWrite) -> SFuture<Duration>;
+    fn put(&self, key: &str, entry: CacheWrite, logger: &Logger) -> SFuture<Duration>;
 
     /// Get the storage location.
     fn location(&self) -> String;

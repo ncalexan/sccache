@@ -19,6 +19,7 @@ use crate::simples3::{
 use directories::UserDirs;
 use futures::future;
 use futures::future::Future;
+use slog::Logger;
 use std::io;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -59,16 +60,18 @@ fn normalize_key(key: &str) -> String {
 }
 
 impl Storage for S3Cache {
-    fn get(&self, key: &str) -> SFuture<Cache> {
+    fn get(&self, key: &str, logger: &Logger) -> SFuture<Cache> {
+        let logger2 = logger.clone();
+        let logger3 = logger.clone();
         let key = normalize_key(key);
 
-        let result_cb = |result| match result {
+        let result_cb = move |result| match result {
             Ok(data) => {
                 let hit = CacheRead::from(io::Cursor::new(data))?;
                 Ok(Cache::Hit(hit))
             }
             Err(e) => {
-                warn!("Got AWS error: {:?}", e);
+                slog_warn!(logger2, "Got AWS error: {:?}", e);
                 Ok(Cache::Miss)
             }
         };
@@ -80,7 +83,7 @@ impl Storage for S3Cache {
             .then(move |credentials| match credentials {
                 Ok(creds) => bucket.get(&key, Some(&creds)),
                 Err(e) => {
-                    debug!("Could not load AWS creds: {}", e);
+                    slog_debug!(logger3, "Could not load AWS creds: {}", e);
                     bucket.get(&key, None)
                 }
             })
@@ -88,7 +91,7 @@ impl Storage for S3Cache {
         Box::new(response)
     }
 
-    fn put(&self, key: &str, entry: CacheWrite) -> SFuture<Duration> {
+    fn put(&self, key: &str, entry: CacheWrite, logger: &Logger) -> SFuture<Duration> {
         let key = normalize_key(&key);
         let start = Instant::now();
         let data = match entry.finish() {

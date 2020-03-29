@@ -279,21 +279,26 @@ where
             may_dist,
             rewrite_includes_only,
         );
-        let out_pretty = parsed_args.output_pretty().into_owned();
+        // let out_pretty = parsed_args.output_pretty().into_owned();
+        let logger0 = logger.clone();
         let result = result.map_err(move |e| {
-            debug!("[{}]: preprocessor failed: {:?}", out_pretty, e);
+            slog_debug!(logger0, "preprocessor failed: {:?}", e);
             e
         });
-        let out_pretty = parsed_args.output_pretty().into_owned();
-        let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone(), &logger);
+        let logger1 = logger.clone();
+        // let out_pretty = parsed_args.output_pretty().into_owned();
+        let extra_hashes = hash_all(&parsed_args.extra_hash_files, &pool.clone(), &logger1);
         let outputs = parsed_args.outputs.clone();
         let args_cwd = cwd.clone();
+
+        let logger2 = logger.clone();
+        let logger3 = logger.clone();
 
         Box::new(
             result
                 .or_else(move |err| {
                     // Errors remove all traces of potential output.
-                    debug!("removing files {:?}", &outputs);
+                    slog_debug!(logger2, "removing files {:?}", &outputs);
 
                     let v: std::result::Result<(), std::io::Error> =
                         outputs.values().fold(Ok(()), |r, f| {
@@ -308,14 +313,14 @@ where
                             })
                         });
                     if v.is_err() {
-                        warn!("Could not remove files after preprocessing failed!\n");
+                        slog_warn!(logger2, "Could not remove files after preprocessing failed!");
                     }
 
                     match err {
                         Error(ErrorKind::ProcessError(output), _) => {
-                            debug!(
-                                "[{}]: preprocessor returned error status {:?}",
-                                out_pretty,
+                            slog_debug!(
+                                logger2,
+                                "preprocessor returned error status {:?}",
                                 output.status.code()
                             );
                             // Drop the stdout since it's the preprocessor output, just hand back stderr and
@@ -329,10 +334,10 @@ where
                     }
                 })
                 .and_then(move |preprocessor_result| {
-                    trace!(
-                        "[{}]: Preprocessor output is {} bytes",
-                        parsed_args.output_pretty(),
-                        preprocessor_result.stdout.len()
+                    slog_trace!(
+                        logger3,
+                        "Preprocessor output is {length} bytes",
+                        length = preprocessor_result.stdout.len(),
                     );
 
                     Box::new(extra_hashes.and_then(move |extra_hashes| {

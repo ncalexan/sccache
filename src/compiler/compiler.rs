@@ -231,7 +231,7 @@ where
             let cache_status = if cache_control == CacheControl::ForceRecache {
                 f_ok(Cache::Recache)
             } else {
-                storage.get(&key)
+                storage.get(&key, &logger)
             };
 
             // Set a maximum time limit for the cache to respond before we forge
@@ -374,7 +374,7 @@ where
 
                                     // Try to finish storing the newly-written cache
                                     // entry. We'll get the result back elsewhere.
-                                    let future = storage.put(&key, entry).then(move |res| {
+                                    let future = storage.put(&key, entry, &logger).then(move |res| {
                                         match res {
                                             Ok(_) => slog_debug!(logger,
                                                 "Stored in cache successfully!",

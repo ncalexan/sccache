@@ -16,6 +16,7 @@ use crate::cache::{Cache, CacheRead, CacheWrite, Storage};
 use futures_cpupool::CpuPool;
 use lru_disk_cache::Error as LruError;
 use lru_disk_cache::LruDiskCache;
+use slog::Logger;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -51,8 +52,9 @@ fn make_key_path(key: &str) -> PathBuf {
 }
 
 impl Storage for DiskCache {
-    fn get(&self, key: &str) -> SFuture<Cache> {
-        trace!("DiskCache::get({})", key);
+    fn get(&self, key: &str, logger: &Logger) -> SFuture<Cache> {
+        let logger2 = logger.clone();
+        slog_trace!(logger, "DiskCache::get({})", key);
         let path = make_key_path(key);
         let lru = self.lru.clone();
         let key = key.to_owned();
@@ -61,11 +63,11 @@ impl Storage for DiskCache {
             let f = match lru.get(&path) {
                 Ok(f) => f,
                 Err(LruError::FileNotInCache) => {
-                    trace!("DiskCache::get({}): FileNotInCache", key);
+                    slog_trace!(logger2, "DiskCache::get({}): FileNotInCache", key);
                     return Ok(Cache::Miss);
                 }
                 Err(LruError::Io(e)) => {
-                    trace!("DiskCache::get({}): IoError: {:?}", key, e);
+                    slog_trace!(logger2, "DiskCache::get({}): IoError: {:?}", key, e);
                     return Err(e.into());
                 }
                 Err(_) => unreachable!(),
@@ -75,10 +77,10 @@ impl Storage for DiskCache {
         }))
     }
 
-    fn put(&self, key: &str, entry: CacheWrite) -> SFuture<Duration> {
+    fn put(&self, key: &str, entry: CacheWrite, logger: &Logger) -> SFuture<Duration> {
         // We should probably do this on a background thread if we're going to buffer
         // everything in memory...
-        trace!("DiskCache::finish_put({})", key);
+        slog_trace!(logger, "DiskCache::finish_put({})", key);
         let lru = self.lru.clone();
         let key = make_key_path(key);
         Box::new(self.pool.spawn_fn(move || {

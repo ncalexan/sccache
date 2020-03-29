@@ -281,6 +281,16 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 
 [[package]]
 name = "chrono"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "158b0bd7d75cbb6bf9c25967a48a2e9f77da95876b858eadfabaa99cd069de6e"
+dependencies = [
+ "num",
+ "time",
+]
+
+[[package]]
+name = "chrono"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31850b4a4d6bae316f7a09e691c944c28299298837edc0a03f755618c23cbc01"
@@ -838,6 +848,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21ceb46a83a85e824ef93669c8b390009623863b5c195d1ba747292c0c72f94e"
+dependencies = [
+ "libc",
+ "winutil",
+]
+
+[[package]]
 name = "http"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -998,7 +1018,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a81d1812d731546d2614737bee92aa071d37e9afa1409bc374da9e5e70e70b22"
 dependencies = [
  "base64 0.10.1",
- "chrono",
+ "chrono 0.4.10",
  "ring",
  "serde",
  "serde_derive",
@@ -1382,12 +1402,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e0a1a39eab95caf4f5556da9289b9e68f0aafac901b2ce80daaf020d3b733a8"
 
 [[package]]
+name = "num"
+version = "0.1.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4703ad64153382334aa8db57c637364c322d3372e097840c72000dabdcf6156e"
+dependencies = [
+ "num-integer",
+ "num-iter",
+ "num-traits 0.2.10",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b85e541ef8255f6cf42bbfe4ef361305c6c135d10919ecc26126c4e5ae94bc09"
 dependencies = [
  "autocfg",
+ "num-traits 0.2.10",
+]
+
+[[package]]
+name = "num-iter"
+version = "0.1.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76bd5272412d173d6bf9afdf98db8612bbabc9a7a830b7bfc9c188911716132e"
+dependencies = [
+ "autocfg",
+ "num-integer",
  "num-traits 0.2.10",
 ]
 
@@ -1961,7 +2003,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0845b9c39ba772da769fe2aaa4d81bfd10695a7ea051d0510702260ff4159841"
 dependencies = [
  "base64 0.9.3",
- "chrono",
+ "chrono 0.4.10",
  "filetime 0.2.8",
  "multipart",
  "num_cpus",
@@ -2044,7 +2086,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "cc",
- "chrono",
+ "chrono 0.4.10",
  "clap",
  "counted-array",
  "crossbeam-utils 0.5.0",
@@ -2092,6 +2134,7 @@ dependencies = [
  "sha2",
  "slog",
  "slog-async",
+ "slog-bunyan",
  "slog-envlogger",
  "slog-scope",
  "slog-stdlog",
@@ -2321,6 +2364,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "slog-bunyan"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83caa757495b2751883cf43e094f69cae4686e65ca6e477a3ef7209ab6232a5a"
+dependencies = [
+ "chrono 0.3.0",
+ "hostname",
+ "slog",
+ "slog-json",
+]
+
+[[package]]
 name = "slog-envlogger"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2333,6 +2388,18 @@ dependencies = [
  "slog-scope",
  "slog-stdlog",
  "slog-term",
+]
+
+[[package]]
+name = "slog-json"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddc0d2aff1f8f325ef660d9a0eb6e6dcd20b30b3f581a5897f58bf42d061c37a"
+dependencies = [
+ "chrono 0.4.10",
+ "serde",
+ "serde_json",
+ "slog",
 ]
 
 [[package]]
@@ -2365,7 +2432,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "124501187c410b6a46fe8a47a48435ae462fae4e02d03c558d358f40b17308cb"
 dependencies = [
  "atty",
- "chrono",
+ "chrono 0.4.10",
  "slog",
  "term 0.6.1",
  "thread_local 1.0.1",
@@ -2605,7 +2672,7 @@ version = "0.6.2"
 source = "git+https://github.com/tiny-http/tiny-http.git?rev=619680de#619680dea2c4f1dfb31b552d5e7b472a9f25b8b8"
 dependencies = [
  "ascii 0.8.7",
- "chrono",
+ "chrono 0.4.10",
  "chunked_transfer",
  "log 0.4.8",
  "openssl",
@@ -3315,6 +3382,15 @@ name = "winreg"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2986deb581c4fe11b621998a5e53361efe6b48a151178d0cd9eeffa4dc6acc9"
+dependencies = [
+ "winapi 0.3.8",
+]
+
+[[package]]
+name = "winutil"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7daf138b6b14196e3830a588acf1e86966c694d3e8fb026fb105b8b5dca07e6e"
 dependencies = [
  "winapi 0.3.8",
 ]

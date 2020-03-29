@@ -73,18 +73,7 @@ pub fn main() {
 
     std::process::exit(match cmdline::parse() {
         Ok(cmd) => {
-            // chrono::offset::Utc::now().timestamp()
-            let logger = if let cmdline::Command::Compile { .. } = cmd {
-                slog_scope::logger().new(slog_o!("x-request-id" => 1))
-            } else {
-                slog_scope::logger().new(slog_o!())
-            };
-
-            // slog_error!(slog_scope::logger(), "foo"; "cmd" => format!("{:?}", cmd));
-
-            // slog_scope::scope(// &slog_scope::logger().new(slog_o!("x-request-id" => 2)),
-            //     &logger,
-            //                   || {
+            let logger = slog_scope::logger().clone();
             match commands::run_command(cmd, logger) {
                 Ok(s) => s,
                 Err(e) => {
@@ -97,8 +86,6 @@ pub fn main() {
                     2
                 }
             }
-            //                   }
-            // )
         },
         Err(e) => {
             println!("sccache: {}", e);
@@ -114,8 +101,13 @@ pub fn main() {
 
 fn init_logging() -> Option<slog_scope::GlobalLoggerGuard> {
     if env::var("RUST_LOG").is_ok() {
-        let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        // let decorator = slog_term::TermDecorator::new().build();
+        // let drain = slog_term::FullFormat::new(decorator).build().fuse();
+
+        // Mutex::new(
+        let drain = slog_bunyan::default(std::io::stderr()).fuse();
+        // ).fuse(),
+
         let drain = slog_envlogger::new(drain);
         let drain = slog_async::Async::new(drain).chan_size(2048).build().fuse();
         let logger = slog::Logger::root(drain, slog_o!()); // "version" => env!("CARGO_PKG_VERSION")));
