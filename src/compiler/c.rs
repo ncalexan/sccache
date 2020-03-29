@@ -178,6 +178,7 @@ pub trait CCompilerImpl: Clone + fmt::Debug + Send + 'static {
         env_vars: &[(OsString, OsString)],
         may_dist: bool,
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> SFuture<process::Output>
     where
         T: CommandCreatorSync;
@@ -191,6 +192,7 @@ pub trait CCompilerImpl: Clone + fmt::Debug + Send + 'static {
         cwd: &Path,
         env_vars: &[(OsString, OsString)],
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)>;
 }
 
@@ -278,6 +280,7 @@ where
             &env_vars,
             may_dist,
             rewrite_includes_only,
+            &logger,
         );
         // let out_pretty = parsed_args.output_pretty().into_owned();
         let logger0 = logger.clone();
@@ -397,6 +400,7 @@ impl<I: CCompilerImpl> Compilation for CCompilation<I> {
         &self,
         path_transformer: &mut dist::PathTransformer,
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
         let CCompilation {
             ref parsed_args,
@@ -413,6 +417,7 @@ impl<I: CCompilerImpl> Compilation for CCompilation<I> {
             cwd,
             env_vars,
             rewrite_includes_only,
+            logger,
         )
     }
 

@@ -55,6 +55,7 @@ impl CCompilerImpl for GCC {
         env_vars: &[(OsString, OsString)],
         may_dist: bool,
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> SFuture<process::Output>
     where
         T: CommandCreatorSync,
@@ -68,6 +69,7 @@ impl CCompilerImpl for GCC {
             may_dist,
             self.kind(),
             rewrite_includes_only,
+            logger,
         )
     }
 
@@ -79,6 +81,7 @@ impl CCompilerImpl for GCC {
         cwd: &Path,
         env_vars: &[(OsString, OsString)],
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
         generate_compile_commands(
             path_transformer,
@@ -88,6 +91,7 @@ impl CCompilerImpl for GCC {
             env_vars,
             self.kind(),
             rewrite_includes_only,
+            logger,
         )
     }
 }
@@ -461,11 +465,12 @@ pub fn preprocess<T>(
     may_dist: bool,
     kind: CCompilerKind,
     rewrite_includes_only: bool,
+    logger: &Logger,
 ) -> SFuture<process::Output>
 where
     T: CommandCreatorSync,
 {
-    trace!("preprocess");
+    slog_trace!(logger, "preprocess");
     let language = match parsed_args.language {
         Language::C => "c",
         Language::Cxx => "c++",
@@ -500,7 +505,7 @@ where
         .current_dir(cwd);
 
     if log_enabled!(Trace) {
-        trace!("preprocess: {:?}", cmd);
+        slog_trace!(logger, "preprocess: {:?}", cmd);
     }
     run_input_output(cmd, None)
 }
@@ -513,6 +518,7 @@ pub fn generate_compile_commands(
     env_vars: &[(OsString, OsString)],
     kind: CCompilerKind,
     rewrite_includes_only: bool,
+    logger: &Logger,
 ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
     // Unused arguments
     #[cfg(not(feature = "dist-client"))]
@@ -522,7 +528,7 @@ pub fn generate_compile_commands(
         let _ = rewrite_includes_only;
     }
 
-    trace!("compile");
+    slog_trace!(logger, "compile");
 
     let out_file = match parsed_args.outputs.get("obj") {
         Some(obj) => obj,

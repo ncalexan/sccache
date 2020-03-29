@@ -57,11 +57,12 @@ impl CCompilerImpl for Diab {
         env_vars: &[(OsString, OsString)],
         may_dist: bool,
         _rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> SFuture<process::Output>
     where
         T: CommandCreatorSync,
     {
-        preprocess(creator, executable, parsed_args, cwd, env_vars, may_dist)
+        preprocess(creator, executable, parsed_args, cwd, env_vars, may_dist, logger)
     }
 
     fn generate_compile_commands(
@@ -72,8 +73,9 @@ impl CCompilerImpl for Diab {
         cwd: &Path,
         env_vars: &[(OsString, OsString)],
         _rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
-        generate_compile_commands(path_transformer, executable, parsed_args, cwd, env_vars)
+        generate_compile_commands(path_transformer, executable, parsed_args, cwd, env_vars, logger)
     }
 }
 
@@ -275,6 +277,7 @@ pub fn preprocess<T>(
     cwd: &Path,
     env_vars: &[(OsString, OsString)],
     _may_dist: bool,
+    logger: &Logger,
 ) -> SFuture<process::Output>
 where
     T: CommandCreatorSync,
@@ -289,7 +292,7 @@ where
         .current_dir(cwd);
 
     if log_enabled!(Trace) {
-        trace!("preprocess: {:?}", cmd);
+        slog_trace!(logger, "preprocess: {:?}", cmd);
     }
     run_input_output(cmd, None)
 }
@@ -300,8 +303,9 @@ pub fn generate_compile_commands(
     parsed_args: &ParsedArguments,
     cwd: &Path,
     env_vars: &[(OsString, OsString)],
+    logger: &Logger,
 ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
-    trace!("compile");
+    slog_trace!(logger, "compile");
 
     let out_file = match parsed_args.outputs.get("obj") {
         Some(obj) => obj,

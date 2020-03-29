@@ -58,6 +58,7 @@ impl CCompilerImpl for Clang {
         env_vars: &[(OsString, OsString)],
         may_dist: bool,
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> SFuture<process::Output>
     where
         T: CommandCreatorSync,
@@ -71,6 +72,7 @@ impl CCompilerImpl for Clang {
             may_dist,
             self.kind(),
             rewrite_includes_only,
+            logger,
         )
     }
 
@@ -82,6 +84,7 @@ impl CCompilerImpl for Clang {
         cwd: &Path,
         env_vars: &[(OsString, OsString)],
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
         gcc::generate_compile_commands(
             path_transformer,
@@ -91,6 +94,7 @@ impl CCompilerImpl for Clang {
             env_vars,
             self.kind(),
             rewrite_includes_only,
+            logger,
         )
     }
 }

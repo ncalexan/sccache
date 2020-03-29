@@ -66,6 +66,7 @@ impl CCompilerImpl for MSVC {
         env_vars: &[(OsString, OsString)],
         may_dist: bool,
         _rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> SFuture<process::Output>
     where
         T: CommandCreatorSync,
@@ -78,6 +79,7 @@ impl CCompilerImpl for MSVC {
             env_vars,
             may_dist,
             &self.includes_prefix,
+            logger
         )
     }
 
@@ -89,8 +91,9 @@ impl CCompilerImpl for MSVC {
         cwd: &Path,
         env_vars: &[(OsString, OsString)],
         _rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
-        generate_compile_commands(path_transformer, executable, parsed_args, cwd, env_vars)
+        generate_compile_commands(path_transformer, executable, parsed_args, cwd, env_vars, logger)
     }
 }
 
@@ -109,6 +112,8 @@ pub fn detect_showincludes_prefix<T>(
 where
     T: CommandCreatorSync,
 {
+    let logger1 = logger.clone();
+    let logger2 = logger.clone();
     let write = write_temp_file(pool, logger, "test.c".as_ref(), b"#include \"test.h\"\n".to_vec());
 
     let exe = exe.to_os_string();
@@ -141,7 +146,7 @@ where
         for (k, v) in env {
             cmd.env(k, v);
         }
-        trace!("detect_showincludes_prefix: {:?}", cmd);
+        slog_trace!(logger1, "detect_showincludes_prefix: {:?}", cmd);
 
         run_input_output(cmd, None).map(|e| {
             // Keep the tempdir around so test.h still exists for the
@@ -150,7 +155,7 @@ where
         })
     });
 
-    Box::new(output.and_then(|(output, tempdir)| {
+    Box::new(output.and_then(move |(output, tempdir)| {
         if !output.status.success() {
             bail!("Failed to detect showIncludes prefix")
         }
@@ -181,7 +186,8 @@ where
         }
         drop(tempdir);
 
-        debug!(
+        slog_debug!(
+            logger2,
             "failed to detect showIncludes prefix with output: {}",
             stdout
         );
@@ -485,6 +491,7 @@ pub fn preprocess<T>(
     env_vars: &[(OsString, OsString)],
     _may_dist: bool,
     includes_prefix: &str,
+    logger: &Logger,
 ) -> SFuture<process::Output>
 where
     T: CommandCreatorSync,
@@ -502,8 +509,8 @@ where
         cmd.arg("-showIncludes");
     }
 
-    if log_enabled!(Debug) {
-        debug!("preprocess: {:?}", cmd);
+    if log_enabled!(Debug) { // XXX?
+        slog_debug!(logger, "preprocess: {:?}", cmd);
     }
 
     let parsed_args = parsed_args.clone();
@@ -577,11 +584,12 @@ fn generate_compile_commands(
     parsed_args: &ParsedArguments,
     cwd: &Path,
     env_vars: &[(OsString, OsString)],
+    logger: &Logger,
 ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
     #[cfg(not(feature = "dist-client"))]
     let _ = path_transformer;
 
-    trace!("compile");
+    slog_trace!(logger, "compile");
     let out_file = match parsed_args.outputs.get("obj") {
         Some(obj) => obj,
         None => return Err("Missing object file output".into()),

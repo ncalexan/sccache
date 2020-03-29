@@ -655,6 +655,8 @@ struct SccacheService<C: CommandCreatorSync> {
 
     logger: Logger,
 
+    last_request_id: i64,
+
     /// An object for creating commands.
     ///
     /// This is mostly useful for unit testing, where we
@@ -841,9 +843,9 @@ where
 
     fn call(&mut self, req: SccacheRequest) -> Self::Future {
         // XXX: generate a GUID.
-        let logger = self.logger.new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp()));
+        self.last_request_id = (self.last_request_id + 1).max(chrono::offset::Utc::now().timestamp());
+        let logger = self.logger.new(slog_o!("x-request-id" => self.last_request_id));
 
-        // let logger = slog_scope::logger().new(slog_o!("x-request-id" => chrono::offset::Utc::now().timestamp()));
         slog_warn!(logger, "handle_client");
 
         // Opportunistically let channel know that we've received a request. We
@@ -856,7 +858,6 @@ where
                 slog_debug!(logger, "handle_client: compile");
                 self.stats.borrow_mut().compile_requests += 1;
                 return self.handle_compile(compile, &logger);
-                    // .with_logger(;
             }
             Request::GetStats => {
                 slog_debug!(logger, "handle_client: get_stats");
@@ -912,6 +913,7 @@ where
             compilers: Rc::new(RefCell::new(HashMap::new())),
             compiler_proxies: Rc::new(RefCell::new(HashMap::new())),
             pool, logger,
+            last_request_id: 0,
             creator: C::new(client),
             tx,
             info,
@@ -1127,7 +1129,7 @@ where
                             &path1,
                             &cwd,
                             env.as_slice(),
-                            &me.pool, &me.logger,
+                            &me.pool, logger,
                             dist_info.clone().map(|(p, _)| p),
                         );
 

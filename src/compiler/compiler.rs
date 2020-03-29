@@ -465,7 +465,7 @@ where
     };
     let mut path_transformer = dist::PathTransformer::default();
     let compile_commands = compilation
-        .generate_compile_commands(&mut path_transformer, rewrite_includes_only)
+        .generate_compile_commands(&mut path_transformer, rewrite_includes_only, &logger)
         .chain_err(|| "Failed to generate compile commands");
     let (compile_cmd, dist_compile_cmd, cacheable) = match compile_commands {
         Ok(cmds) => cmds,
@@ -641,6 +641,7 @@ pub trait Compilation {
         &self,
         path_transformer: &mut dist::PathTransformer,
         rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)>;
 
     /// Create a function that will create the inputs used to perform a distributed compilation

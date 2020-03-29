@@ -1512,6 +1512,7 @@ impl Compilation for RustCompilation {
         &self,
         path_transformer: &mut dist::PathTransformer,
         _rewrite_includes_only: bool,
+        logger: &Logger,
     ) -> Result<(CompileCommand, Option<dist::CompileCommand>, Cacheable)> {
         let RustCompilation {
             ref executable,
@@ -1532,7 +1533,7 @@ impl Compilation for RustCompilation {
             let _ = sysroot;
         }
 
-        trace!("[{}]: compile", crate_name);
+        slog_trace!(logger, "[{crate_name}]: compile", crate_name = crate_name); // XXX annotate?
 
         let command = CompileCommand {
             executable: executable.to_owned(),
@@ -1553,7 +1554,7 @@ impl Compilation for RustCompilation {
                     match $e {
                         Ok(s) => s,
                         Err(e) => {
-                            debug!("Conversion failed for distributed compile argument: {}", e);
+                            slog_debug!(logger, "Conversion failed for distributed compile argument: {}", e);
                             return None;
                         }
                     }
