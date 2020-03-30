@@ -14,6 +14,7 @@
 
 use crate::compiler;
 use rand::RngCore;
+// use slog::Logger;
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, Read};
@@ -742,7 +743,12 @@ pub trait Client {
         compiler_path: &Path,
         weak_key: &str,
         toolchain_packager: Box<dyn pkg::ToolchainPackager>,
+        // logger: &Logger,
     ) -> SFuture<(Toolchain, Option<(String, PathBuf)>)>;
     fn rewrite_includes_only(&self) -> bool;
-    fn get_custom_toolchain(&self, exe: &PathBuf) -> Option<PathBuf>;
+    fn get_custom_toolchain(
+        &self,
+        exe: &PathBuf,
+        // logger: &Logger,
+    ) -> Option<PathBuf>;
 }

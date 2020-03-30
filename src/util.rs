@@ -36,12 +36,16 @@ use crate::errors::*;
 #[derive(Clone)]
 pub struct Digest {
     inner: blake3_Hasher,
+    logger: Logger,
 }
 
 impl Digest {
-    pub fn new() -> Digest {
+    pub fn new<L>(logger: L) -> Digest
+    where L: std::borrow::Borrow<Logger>,
+    {
         Digest {
             inner: blake3_Hasher::new(),
+            logger: logger.borrow().clone(),
         }
     }
 
@@ -55,8 +59,8 @@ impl Digest {
     }
 
     /// Calculate the BLAKE3 digest of the contents read from `reader`.
-    pub fn reader_sync<R: Read>(reader: R, annotation: &dyn Display) -> Result<String> {
-        let mut m = Digest::new();
+    pub fn reader_sync<R: Read>(reader: R, annotation: &dyn Display, logger: &Logger) -> Result<String> {
+        let mut m = Digest::new(logger);
         let mut reader = BufReader::new(reader);
         loop {
             // A buffer of 128KB should give us the best performance.
@@ -74,10 +78,11 @@ impl Digest {
     /// Calculate the BLAKE3 digest of the contents of `path`, running
     /// the actual hash computation on a background thread in `pool`.
     pub fn reader(path: PathBuf, pool: &CpuPool, logger: &Logger) -> SFuture<String> {
+        let logger = logger.clone();
         Box::new(pool.spawn_fn(move || -> Result<_> {
             let reader = File::open(&path)
                 .chain_err(|| format!("Failed to open file for hashing: {:?}", path))?;
-            Digest::reader_sync(reader, &path.display())
+            Digest::reader_sync(reader, &path.display(), &logger)
         }))
     }
 
@@ -86,7 +91,10 @@ impl Digest {
             let mut fragment = blake3_Hasher::new();
             fragment.update(bytes);
             let fragment = hex(fragment.finalize().as_bytes());
-            debug!("Digest: {} -> '{}'", annotation, fragment);
+            slog_debug!(&self.logger,
+                        "Digest: {annotation} -> '{fragment}'",
+                        annotation = format!("{}", annotation),
+                        fragment = &fragment);
         }
         self.inner.update(bytes);
     }
@@ -96,11 +104,11 @@ impl Digest {
     }
 }
 
-impl Default for Digest {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl Default for Digest {
+//     fn default() -> Self {
+//         Self::new()
+//     }
+// }
 
 pub fn hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);

@@ -1059,6 +1059,7 @@ mod client {
     use flate2::Compression;
     use futures::Future;
     use futures_cpupool::CpuPool;
+    use slog::Logger;
     use std::collections::HashMap;
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -1098,6 +1099,7 @@ mod client {
             toolchain_configs: &[config::DistToolchainConfig],
             auth_token: String,
             rewrite_includes_only: bool,
+            logger: &Logger,
         ) -> Result<Self> {
             let timeout = Duration::new(REQUEST_TIMEOUT_SECS, 0);
             let connect_timeout = Duration::new(CONNECT_TIMEOUT_SECS, 0);
@@ -1112,7 +1114,7 @@ mod client {
                 .build()
                 .chain_err(|| "failed to create an async HTTP client")?;
             let client_toolchains =
-                cache::ClientToolchains::new(cache_dir, cache_size, toolchain_configs)
+                cache::ClientToolchains::new(cache_dir, cache_size, toolchain_configs, logger)
                     .chain_err(|| "failed to initialise client toolchains")?;
             Ok(Self {
                 auth_token,
@@ -1294,20 +1296,26 @@ mod client {
             compiler_path: &Path,
             weak_key: &str,
             toolchain_packager: Box<dyn ToolchainPackager>,
+            // logger: &Logger,
         ) -> SFuture<(Toolchain, Option<(String, PathBuf)>)> {
             let compiler_path = compiler_path.to_owned();
             let weak_key = weak_key.to_owned();
             let tc_cache = self.tc_cache.clone();
+            // let logger = logger.clone();
             Box::new(self.pool.spawn_fn(move || {
-                tc_cache.put_toolchain(&compiler_path, &weak_key, toolchain_packager)
+                tc_cache.put_toolchain(&compiler_path, &weak_key, toolchain_packager// , &logger
+                )
             }))
         }
 
         fn rewrite_includes_only(&self) -> bool {
             self.rewrite_includes_only
         }
-        fn get_custom_toolchain(&self, exe: &PathBuf) -> Option<PathBuf> {
-            match self.tc_cache.get_custom_toolchain(exe) {
+
+        fn get_custom_toolchain(&self, exe: &PathBuf// , logger: &Logger
+        ) -> Option<PathBuf> {
+            match self.tc_cache.get_custom_toolchain(exe// , logger
+            ) {
                 Some(Ok((_, _, path))) => Some(path),
                 _ => None,
             }

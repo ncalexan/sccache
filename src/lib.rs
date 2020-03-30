@@ -105,16 +105,27 @@ fn init_logging() -> Option<slog_scope::GlobalLoggerGuard> {
         // let drain = slog_term::FullFormat::new(decorator).build().fuse();
 
         // Mutex::new(
+
         let drain = slog_bunyan::default(std::io::stderr()).fuse();
+
         // ).fuse(),
 
-        let drain = slog_envlogger::new(drain);
+        // let drain = 
+        //     std::sync::Mutex::new(
+        //         slog_json::Json::default(std::io::stderr())
+        //     ).fuse();
+
+        // let drain = std::sync::Mutex::new(slog_json::Json::default(std::io::stderr())).map(slog::Fuse);
+
+        let drain = std::sync::Mutex::new(slog_envlogger::new(drain)).map(slog::Fuse);
+        // let drain = slog_envlogger::new(drain);
         let drain = slog_async::Async::new(drain).chan_size(2048).build().fuse();
         let logger = slog::Logger::root(drain, slog_o!()); // "version" => env!("CARGO_PKG_VERSION")));
 
-        let scope_guard = slog_scope::set_global_logger(logger);
+        let scope_guard = slog_scope::set_global_logger(logger.clone());
         let _log_guard = slog_stdlog::init().unwrap();
 
+        slog_info!(logger, "test"; "foo" => SerializeWrapper(vec![123]));
         // Note: this `info!(...)` macro comes from `log` crate
         info!("standard logging redirected to slog");
 
@@ -125,5 +136,30 @@ fn init_logging() -> Option<slog_scope::GlobalLoggerGuard> {
         Some(scope_guard)
     } else {
         None
+    }
+}
+
+use erased_serde;
+
+#[derive(Clone, Serialize)]
+pub struct SerializeWrapper<T>(T);
+
+impl<T> slog::SerdeValue for SerializeWrapper<T>
+where T: serde::Serialize + Clone + Send + 'static
+{
+  fn as_serde(&self) -> &dyn erased_serde::Serialize {
+      self
+  }
+
+  fn to_sendable(&self) -> Box<dyn slog::SerdeValue + Send + 'static> {
+      Box::new(self.clone())
+  }
+}
+
+impl<T> slog::Value for SerializeWrapper<T>
+where T: serde::Serialize + Clone + Send + 'static
+{
+    fn serialize(&self, _: &slog::Record<'_>, key: slog::Key, serializer: &mut dyn slog::Serializer) -> slog::Result {
+        serializer.emit_serde(key, self)
     }
 }

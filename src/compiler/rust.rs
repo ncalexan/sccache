@@ -1300,10 +1300,11 @@ where
         let staticlib_hashes = hash_all(&abs_staticlibs, pool, logger);
         let creator = creator.clone();
         let hashes = source_files_and_hashes.join3(extern_hashes, staticlib_hashes);
+        let hashes_logger = logger.clone();
         Box::new(hashes.and_then(
             move |((source_files, source_hashes), extern_hashes, staticlib_hashes)| -> SFuture<_> {
                 // If you change any of the inputs to the hash, you should change `CACHE_VERSION`.
-                let mut m = Digest::new();
+                let mut m = Digest::new(hashes_logger);
                 // Hash inputs:
                 // 1. A version
                 m.update(CACHE_VERSION, &"");

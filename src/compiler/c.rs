@@ -272,6 +272,9 @@ where
             compiler,
             logger,
         } = me;
+
+        let logger = logger.new(slog_o!("output_pretty" => parsed_args.output_pretty().into_owned()));
+
         let result = compiler.preprocess(
             creator,
             &executable,
@@ -352,6 +355,7 @@ where
                                 &extra_hashes,
                                 &env_vars,
                                 &preprocessor_result.stdout,
+                                &logger3,
                             )
                         };
                         // A compiler binary may be a symlink to another and so has the same digest, but that means
@@ -645,9 +649,10 @@ pub fn hash_key(
     extra_hashes: &[String],
     env_vars: &[(OsString, OsString)],
     preprocessor_output: &[u8],
+    logger: &Logger,
 ) -> String {
     // If you change any of the inputs to the hash, you should change `CACHE_VERSION`.
-    let mut m = Digest::new();
+    let mut m = Digest::new(logger);
     m.update(compiler_digest.as_bytes(), &"compiler_digest");
     m.update(CACHE_VERSION, &"CACHE_VERSION");
     m.update(language.as_str().as_bytes(), &"language");

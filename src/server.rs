@@ -140,6 +140,7 @@ pub struct DistClientContainer {
 struct DistClientConfig {
     // Reusable items tied to an SccacheServer instance
     pool: CpuPool,
+    logger: Logger,
 
     // From the static dist configuration
     scheduler_url: Option<config::HTTPUrl>,
@@ -191,6 +192,7 @@ impl DistClientContainer {
     fn new(config: &Config, pool: &CpuPool, logger: &Logger) -> Self { // XXX drop logger.
         let config = DistClientConfig {
             pool: pool.clone(),
+            logger: logger.clone(),
 
             scheduler_url: config.dist.scheduler_url.clone(),
             auth: config.dist.auth.clone(),
@@ -283,7 +285,7 @@ impl DistClientContainer {
                 DistClientState::RetryCreateAt(config, _) => config,
                 _ => unreachable!(),
             };
-            info!("Attempting to recreate the dist client");
+            slog_info!(config.logger, "Attempting to recreate the dist client");
             *state = Self::create_state(*config)
         }
     }
@@ -296,7 +298,7 @@ impl DistClientContainer {
                     Ok(v) => v,
                     Err(e) => {
                         use error_chain::ChainedError;
-                        error!("{}", e.display_chain());
+                        slog_error!(&config.logger, "{}", e.display_chain());
                         return DistClientState::RetryCreateAt(
                             Box::new(config),
                             Instant::now() + DIST_CLIENT_RECREATE_TIMEOUT,
@@ -313,7 +315,7 @@ impl DistClientContainer {
                     Err(e) => {
                         use error_chain::ChainedError;
                         let errmsg = e.display_chain();
-                        error!("{}", errmsg);
+                        slog_error!(&config.logger, "{}", errmsg);
                         return DistClientState::FailWithMessage(
                             Box::new(config),
                             errmsg.to_string(),
@@ -326,7 +328,7 @@ impl DistClientContainer {
         match config.scheduler_url.clone() {
             Some(addr) => {
                 let url = addr.to_url();
-                info!("Enabling distributed sccache to {}", url);
+                slog_info!(&config.logger, "Enabling distributed sccache to {}", url);
                 let auth_token = match &config.auth {
                     config::DistAuth::Token { token } => Ok(token.to_owned()),
                     config::DistAuth::Oauth2CodeGrantPKCE { auth_url, .. }
@@ -346,6 +348,7 @@ impl DistClientContainer {
                     &config.toolchains,
                     auth_token,
                     config.rewrite_includes_only,
+                    &config.logger.clone(),
                 );
                 let dist_client = try_or_retry_later!(
                     dist_client.chain_err(|| "failure during dist client creation")
@@ -353,14 +356,14 @@ impl DistClientContainer {
                 use crate::dist::Client;
                 match dist_client.do_get_status().wait() {
                     Ok(res) => {
-                        info!(
+                        slog_info!(&config.logger, 
                             "Successfully created dist client with {:?} cores across {:?} servers",
                             res.num_cpus, res.num_servers
                         );
                         DistClientState::Some(Box::new(config), Arc::new(dist_client))
                     }
                     Err(_) => {
-                        warn!("Scheduler address configured, but could not communicate with scheduler");
+                        slog_warn!(&config.logger, "Scheduler address configured, but could not communicate with scheduler");
                         DistClientState::RetryCreateAt(
                             Box::new(config),
                             Instant::now() + DIST_CLIENT_RECREATE_TIMEOUT,
@@ -369,7 +372,7 @@ impl DistClientContainer {
                 }
             }
             None => {
-                info!("No scheduler address configured, disabling distributed sccache");
+                slog_info!(&config.logger, "No scheduler address configured, disabling distributed sccache");
                 DistClientState::Disabled
             }
         }
@@ -1063,7 +1066,8 @@ where
                 // the provided commandline.
                 match c.parse_arguments(&cmd, &cwd, &logger) {
                     CompilerArguments::Ok(hasher) => {
-                        slog_debug!(logger, "parse_arguments: Ok: {:?}", cmd);
+                        let cmd2: Vec<_> = cmd.iter().map(|x| x.to_string_lossy().into_owned()).collect();
+                        slog_debug!(logger, "parse_arguments: Ok"; "cmd" => crate::SerializeWrapper(cmd));
                         stats.requests_executed += 1;
                         let (tx, rx) = Body::pair();
                         self.start_compile_task(c, hasher, cmd, cwd, env_vars, tx, logger);

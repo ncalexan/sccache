@@ -509,7 +509,8 @@ where
         })
         .and_then(move |(mut dist_compile_cmd, (inputs_packager, toolchain_packager, outputs_rewriter), dist_output_paths)| {
             slog_debug!(logger2, "Identifying dist toolchain for {:?}", local_executable);
-            dist_client.put_toolchain(&local_executable, &weak_toolchain_key, toolchain_packager)
+            dist_client.put_toolchain(&local_executable, &weak_toolchain_key, toolchain_packager// , &logger2
+            )
                 .and_then(|(dist_toolchain, maybe_dist_compile_executable)| {
                     let mut tc_archive = None;
                     if let Some((dist_compile_executable, archive_path)) = maybe_dist_compile_executable {

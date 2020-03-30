@@ -622,6 +622,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "erased-serde"
+version = "0.3.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d88b6d1705e16a4d62e05ea61cc0496c2bd190f4fa8e5c1f11ce747be6bcf3d1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "error-chain"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2092,6 +2101,7 @@ dependencies = [
  "crossbeam-utils 0.5.0",
  "daemonize",
  "directories",
+ "erased-serde",
  "error-chain 0.12.1",
  "escargot",
  "filetime 0.2.8",
@@ -2136,6 +2146,7 @@ dependencies = [
  "slog-async",
  "slog-bunyan",
  "slog-envlogger",
+ "slog-json",
  "slog-scope",
  "slog-stdlog",
  "slog-term",
@@ -2350,6 +2361,9 @@ name = "slog"
 version = "2.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1cc9c640a4adbfbcc11ffb95efe5aa7af7309e002adab54b185507dbf2377b99"
+dependencies = [
+ "erased-serde",
+]
 
 [[package]]
 name = "slog-async"
@@ -2397,6 +2411,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddc0d2aff1f8f325ef660d9a0eb6e6dcd20b30b3f581a5897f58bf42d061c37a"
 dependencies = [
  "chrono 0.4.10",
+ "erased-serde",
  "serde",
  "serde_json",
  "slog",

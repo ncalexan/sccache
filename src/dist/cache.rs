@@ -1,6 +1,7 @@
 use crate::dist::Toolchain;
 use lru_disk_cache::Result as LruResult;
 use lru_disk_cache::{LruDiskCache, ReadSeek};
+use slog::Logger;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,7 @@ mod client {
     use crate::dist::pkg::ToolchainPackager;
     use crate::dist::Toolchain;
     use lru_disk_cache::Error as LruError;
+    use slog::Logger;
     use std::collections::{HashMap, HashSet};
     use std::fs;
     use std::io::Write;
@@ -54,14 +56,21 @@ mod client {
         //   that if two of them match, the contents of a compiler archive cannot
         //   have been tampered with
         weak_map: Mutex<HashMap<String, String>>,
+
+        logger: Logger,
     }
 
     impl ClientToolchains {
-        pub fn new(
+        pub fn new<L>(
             cache_dir: &Path,
             cache_size: u64,
             toolchain_configs: &[config::DistToolchainConfig],
-        ) -> Result<Self> {
+            logger: L,
+        ) -> Result<Self>
+        where L: std::borrow::Borrow<Logger>,
+        {
+            let logger = logger.borrow().clone();
+
             let cache_dir = cache_dir.to_owned();
             fs::create_dir_all(&cache_dir)
                 .chain_err(|| "failed to create top level toolchain cache dir")?;
@@ -86,7 +95,7 @@ mod client {
                 .chain_err(|| "failed to load toolchain weak map")?;
 
             let tc_cache_dir = cache_dir.join("tc");
-            let cache = TcCache::new(&tc_cache_dir, cache_size)
+            let cache = TcCache::new(&tc_cache_dir, cache_size, logger.clone())
                 .map(Mutex::new)
                 .chain_err(|| "failed to initialise a toolchain cache")?;
 
@@ -100,9 +109,10 @@ mod client {
                         archive,
                         archive_compiler_executable,
                     } => {
-                        debug!(
-                            "Registering custom toolchain for {}",
-                            compiler_executable.display()
+                        slog_debug!(
+                            logger, 
+                            "Registering custom toolchain for {compiler_executable}",
+                            compiler_executable = compiler_executable.display()
                         );
                         let custom_tc = CustomToolchain {
                             archive: archive.clone(),
@@ -124,7 +134,9 @@ mod client {
                     config::DistToolchainConfig::NoDist {
                         compiler_executable,
                     } => {
-                        debug!("Disabling toolchain {}", compiler_executable.display());
+                        slog_debug!(logger,
+                                    "Disabling toolchain {compiler_executable}",
+                                    compiler_executable = compiler_executable.display());
                         if !disabled_toolchains.insert(compiler_executable.clone()) {
                             bail!(
                                 "Disabled toolchain {} multiple times",
@@ -151,6 +163,7 @@ mod client {
                 // TODO: shouldn't clear on restart, but also should have some
                 // form of pruning
                 weak_map: Mutex::new(weak_map),
+                logger: logger.clone(),
             })
         }
 
@@ -185,6 +198,7 @@ mod client {
             compiler_path: &Path,
             weak_key: &str,
             toolchain_packager: Box<dyn ToolchainPackager>,
+            // logger: &Logger,
         ) -> Result<(Toolchain, Option<(String, PathBuf)>)> {
             if self.disabled_toolchains.contains(compiler_path) {
                 bail!(
@@ -193,7 +207,9 @@ mod client {
                 )
             }
             if let Some(tc_and_paths) = self.get_custom_toolchain(compiler_path) {
-                debug!("Using custom toolchain for {:?}", compiler_path);
+                slog_debug!(&self.logger,
+                            "Using custom toolchain for {compiler_path}",
+                            compiler_path = format!("{:?}", compiler_path));
                 let (tc, compiler_path, archive) = tc_and_paths?;
                 return Ok((tc, Some((compiler_path, archive))));
             }
@@ -201,15 +217,21 @@ mod client {
             // to create the same toolchain, just a waste of time
             let mut cache = self.cache.lock().unwrap();
             if let Some(archive_id) = self.weak_to_strong(weak_key) {
-                debug!("Using cached toolchain {} -> {}", weak_key, archive_id);
+                slog_debug!(&self.logger,
+                            "Using cached toolchain {weak_key} -> {archive_id}",
+                            weak_key = weak_key,
+                            archive_id = &archive_id);
                 return Ok((Toolchain { archive_id }, None));
             }
-            debug!("Weak key {} appears to be new", weak_key);
+            slog_debug!(&self.logger,
+                        "Weak key {weak_key} appears to be new", 
+                        weak_key = weak_key);
             let tmpfile = tempfile::NamedTempFile::new_in(self.cache_dir.join("toolchain_tmp"))?;
             toolchain_packager
                 .write_pkg(tmpfile.reopen()?)
                 .chain_err(|| "Could not package toolchain")?;
-            let tc = cache.insert_file(tmpfile.path())?;
+            let tc = cache.insert_file(tmpfile.path()// , logger
+            )?;
             self.record_weak(weak_key.to_owned(), tc.archive_id.clone())?;
             Ok((tc, None))
         }
@@ -217,6 +239,7 @@ mod client {
         pub fn get_custom_toolchain(
             &self,
             compiler_path: &Path,
+            // logger: &Logger,
         ) -> Option<Result<(Toolchain, String, PathBuf)>> {
             match self
                 .custom_toolchain_paths
@@ -230,7 +253,7 @@ mod client {
                     custom_tc.archive.clone(),
                 ))),
                 Some((custom_tc, maybe_tc @ None)) => {
-                    let archive_id = match path_key(&custom_tc.archive) {
+                    let archive_id = match path_key(&custom_tc.archive, &self.logger) {
                         Ok(archive_id) => archive_id,
                         Err(e) => return Some(Err(e)),
                     };
@@ -246,7 +269,7 @@ mod client {
                         // Log a warning if the user has identical toolchains at two different locations - it's
                         // not strictly wrong, but it is a bit odd
                         if old_path != custom_tc.archive {
-                            warn!(
+                            slog_warn!(&self.logger, 
                                 "Detected interchangable toolchain archives at {} and {}",
                                 old_path.display(),
                                 custom_tc.archive.display()
@@ -450,13 +473,18 @@ mod client {
 
 pub struct TcCache {
     inner: LruDiskCache,
+    logger: Logger,
 }
 
 impl TcCache {
-    pub fn new(cache_dir: &Path, cache_size: u64) -> Result<TcCache> {
-        trace!("Using TcCache({:?}, {})", cache_dir, cache_size);
+    pub fn new<L>(cache_dir: &Path, cache_size: u64, logger: L) -> Result<TcCache>
+    where L: std::borrow::Borrow<Logger>,
+    {
+        let logger = logger.borrow().clone();
+        slog_trace!(logger, "Using TcCache({:?}, {})", cache_dir, cache_size);
         Ok(TcCache {
             inner: LruDiskCache::new(cache_dir, cache_size)?,
+            logger,
         })
     }
 
@@ -472,7 +500,7 @@ impl TcCache {
         self.inner
             .insert_with(make_lru_key_path(&tc.archive_id), with)
             .map_err(|e| -> Error { e.into() })?;
-        let verified_archive_id = file_key(self.get(tc)?, &tc.archive_id)?;
+        let verified_archive_id = file_key(self.get(tc)?, &tc.archive_id, &self.logger)?;
         // TODO: remove created toolchain?
         if verified_archive_id == tc.archive_id {
             Ok(())
@@ -503,7 +531,7 @@ impl TcCache {
 
     #[cfg(feature = "dist-client")]
     fn insert_file(&mut self, path: &Path) -> Result<Toolchain> {
-        let archive_id = path_key(&path)?;
+        let archive_id = path_key(&path, &self.logger)?;
         self.inner
             .insert_file(make_lru_key_path(&archive_id), path)
             .map_err(|e| -> Error { e.into() })?;
@@ -512,12 +540,12 @@ impl TcCache {
 }
 
 #[cfg(feature = "dist-client")]
-fn path_key(path: &Path) -> Result<String> {
-    file_key(fs::File::open(path)?, &path.display())
+fn path_key(path: &Path, logger: &Logger) -> Result<String> {
+    file_key(fs::File::open(path)?, &path.display(), logger)
 }
 
-fn file_key<R: Read>(rdr: R, annotation: &dyn Display) -> Result<String> {
-    Digest::reader_sync(rdr, annotation)
+fn file_key<R: Read>(rdr: R, annotation: &dyn Display, logger: &Logger) -> Result<String> {
+    Digest::reader_sync(rdr, annotation, logger)
 }
 /// Make a path to the cache entry with key `key`.
 fn make_lru_key_path(key: &str) -> PathBuf {
